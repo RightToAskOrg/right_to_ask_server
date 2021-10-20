@@ -1,0 +1,7 @@
+
+[workspace]
+
+members = [
+    "right_to_ask_api",
+    "right_to_ask_server",
+]
