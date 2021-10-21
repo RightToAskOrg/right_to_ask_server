@@ -63,3 +63,13 @@ mysql://bulletinboard:stick-the-bulletin-board-password-here@localhost:3306/bull
 Initialize the two databases via the command `./target/release/initialize_databases`. 
 
 
+## Copyright
+
+This program is Copyright 2021 Thinking Cybersecurity Pty. Ltd. 
+
+Licenses subject to change soon.
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
