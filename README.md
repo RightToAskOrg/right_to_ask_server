@@ -62,6 +62,14 @@ mysql://bulletinboard:stick-the-bulletin-board-password-here@localhost:3306/bull
 
 Initialize the two databases via the command `./target/release/initialize_databases`. 
 
+### Running the server
+
+```bash
+./target/release/right_to_ask_server
+```
+`./target/release/initialize_databases`.
+This will create a new webserver which has a home page providing some test and diagnostic pages. Its url will
+be printed. Stop with control-C.
 
 ## Copyright
 
