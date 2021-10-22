@@ -1,0 +1,44 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="common.css">
+    <script src="util.js"></script>
+    <script src="common.js"></script>
+    <script src="AddUser.js"></script>
+    <title>Add User - Testing only</title>
+</head>
+<body>
+
+<p>Note: This is not for production use. It is for testing purposes only.</p>
+
+<label for="UID">UID: </label><input type="text" id="UID"/><br/>
+<label for="DisplayName">Display Name: </label><input type="text" id="DisplayName"/><br/>
+<label for="PublicKey">Public Key: </label><input type="text" id="PublicKey"/><br/>
+<label for="State">State: </label><select id="State">
+    <option value="empty">Unspecified</option>
+    <option value="ACT">ACT</option>
+    <option value="NSW">NSW</option>
+    <option value="NT">NT</option>
+    <option value="QLD">QLD</option>
+    <option value="SA">SA</option>
+    <option value="TAS">TAS</option>
+    <option value="VIC">VIC</option>
+    <option value="WA">WA</option>
+</select><br/>
+<label for="Electorates">Electorates (semicolon separated list of chamber,electorate with no additional whitespace): </label><input type="text" id="Electorates"/><br/>
+
+<button id="Add">Add</button>
+
+
+<div id="status">
+    <h5>Status</h5>
+</div>
+
+<h5>User List</h5>
+<div id="UserList">
+</div>
+
+</body>
+</html>

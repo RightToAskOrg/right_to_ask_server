@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Right to Ask Server</title>
+</head>
+
+<body>
+
+<h4>Right to Ask API</h4>
+
+<a href="AddUser.html">Add a user (testing)</a>
+
+<h4>Bulletin Board</h4>
+
+<a href="BulletinBoard.html">View the bulletin board</a> <br/>
+<a href="LookupHash.html?hash=abcChangeThisToYourHashValue123">Look up a given hash, and prove it is published, etc.</a> <br/>
+
+<h5> Direct API GET calls</h5>
+
+<a href="get_parentless_unpublished_hash_values">Get hash values committed to but not yet published.</a> <br/>
+<a href="get_most_recent_published_root">Get currently published root (assuming there is one).</a> <br/>
+<a href="get_all_published_roots">Get all published roots.</a> <br/>
+<a href="get_hash_info?hash=abcChangeThisToYourHashValue123">Query information about a single hash value.</a> <br/>
+<a href="get_proof_chain?hash=abcChangeThisToYourHashValue123">Get a full proof chain for a single hash value.</a> <br/>
+
+<h5>Journal</h5>
+
+For bulk verification, a <a href="journal/">journal</a> is available listing all transactions.
+<a href="journal/pending.csv">pending.csv</a> contains the transactions since the last published root;
+the transactions between a published hash and the prior hash are in the file named after the hash.
+
+</body>
+</html>
