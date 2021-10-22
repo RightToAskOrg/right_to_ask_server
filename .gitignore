@@ -1,1 +1,4 @@
 /target
+Cargo.lock
+bulletin_board_url
+database_url
