@@ -18,9 +18,23 @@ impl fmt::Display for State {
 }
 /// A chamber of an Australian parliament.
 #[derive(Debug,Clone,Copy,Serialize,Deserialize,Eq,PartialEq)]
-pub enum Chamber { // TODO make reasonable
-    LegislativeCouncil,
-    LegislativeAssembly,
+#[allow(non_camel_case_types)]
+pub enum Chamber {
+    ACT_Legislative_Assembly,
+    Australian_House_Of_Representatives,
+	Australian_Senate,
+	NSW_Legislative_Assembly,
+	NSW_Legislative_Council,
+	NT_Legislative_Assembly,
+	Qld_Legislative_Assembly,
+	SA_Legislative_Assembly,
+	SA_Legislative_Council,
+	Vic_Legislative_Assembly,
+	Vic_Legislative_Council,
+	Tas_House_Of_Assembly,
+	Tas_Legislative_Council,
+	WA_Legislative_Assembly,
+	WA_Legislative_Council
 }
 
 // Provide Display & to_string() for Chamber enum
