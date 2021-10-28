@@ -95,6 +95,14 @@ pub async fn get_list_of_all_users() -> mysql::Result<Vec<String>> {
     let elements : Vec<String> = conn.exec_map("SELECT UID from USERS",(),|(v,)|v)?;
     Ok(elements)
 }
+/// Get the number of users of the system.
+pub async fn get_count_of_all_users() -> mysql::Result<usize> {
+    let mut conn = get_rta_database_connection().await?;
+    let elements : usize = conn.exec_first("SELECT COUNT(UID) from USERS",())?.unwrap();
+    Ok(elements)
+}
+
+
 /// Information to request that an email be sent asking for verification.
 #[derive(Debug,Clone,Serialize,Deserialize,Eq,PartialEq)]
 pub struct RequestEmailValidation {

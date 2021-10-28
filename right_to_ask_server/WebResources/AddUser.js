@@ -14,22 +14,34 @@ function updateUserList() {
     getWebJSON("get_user_list",success,failure);
 }
 
+// function taken from tweetnacl-util, by Dmitry Chestnykh and Devi Mandiri, public domain.
+function decodeBase64(s) {
+    var i, d = atob(s), b = new Uint8Array(d.length);
+    for (i = 0; i < d.length; i++) b[i] = d.charCodeAt(i);
+    return b;
+}
+
 function check_signature(signed) {
     const message = signed.message;
     const signature = signed.signature;
-    function success(result) {
+    function success(publicKey) {
+        const messageUint8Array = (new TextEncoder()).encode(message);
+        const signatureUint8Array = decodeBase64(signature);
+        const publicKeyUint8Array = decodeBase64(publicKey);
+        let verified = nacl.sign.detached.verify(messageUint8Array,signatureUint8Array,publicKeyUint8Array);
+        status("Verified "+verified+" for "+signature+" as a signature for "+message+" public key "+publicKey);
         if (crypto && crypto.subtle) {
             // actually can't do anything useful
         }
     }
-    getWebJSON("new_registration",success,failure)
+    getWebJSON("get_server_public_key_raw",success,failure)
 }
 
 function addUser() {
     function success(result) {
         console.log(result);
         if (result.Ok) {
-            // check_signature(result.Ok);
+            check_signature(result.Ok);
             status("Added user successfully. Bulletin Board hash "+result.Ok.message+" signature "+result.Ok.signature);
         } else {
             status("Tried to add user. Got Error message "+result.Err);

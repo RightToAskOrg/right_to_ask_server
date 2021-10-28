@@ -2,11 +2,11 @@ use actix_web::{HttpServer, middleware, web};
 use actix_web::{get, post};
 use std::path::PathBuf;
 use actix_web::web::Json;
-use right_to_ask_api::person::{NewRegistration, get_list_of_all_users};
+use right_to_ask_api::person::{NewRegistration, get_list_of_all_users, get_count_of_all_users};
 use merkle_tree_bulletin_board::hash::HashValue;
 use right_to_ask_api::database::get_bulletin_board;
 use merkle_tree_bulletin_board::hash_history::{FullProof, HashInfo};
-use right_to_ask_api::signing::{get_server_public_key_base64encoded, ServerSigned};
+use right_to_ask_api::signing::{get_server_public_key_base64encoded, ServerSigned, get_server_public_key_raw_hex, get_server_public_key_raw_base64};
 
 #[post("/new_registration")]
 async fn new_registration(command : Json<NewRegistration>) -> Json<Result<ServerSigned,String>> {
@@ -14,9 +14,21 @@ async fn new_registration(command : Json<NewRegistration>) -> Json<Result<Server
 }
 
 /// Get server public key, in base64 encoded SPKI format (PEM body).
-#[get("/get_server_public_key")]
-async fn get_server_public_key() -> Json<String> {
+#[get("/get_server_public_key_spki")]
+async fn get_server_public_key_spki() -> Json<String> {
     Json(get_server_public_key_base64encoded())
+}
+
+/// Get server public key, in hex raw 32 bytes (64 hex characters).
+#[get("/get_server_public_key_hex")]
+async fn get_server_public_key_hex() -> Json<String> {
+    Json(get_server_public_key_raw_hex())
+}
+
+/// Get server public key, in hex raw 32 bytes (64 hex characters).
+#[get("/get_server_public_key_raw")]
+async fn get_server_public_key_raw() -> Json<String> {
+    Json(get_server_public_key_raw_base64())
 }
 
 /// For testing only!
@@ -93,11 +105,17 @@ fn find_web_resources() -> PathBuf {
 
 #[actix_rt::main]
 async fn main() -> anyhow::Result<()> {
-    println!("Running demo webserver on http://localhost:8099");
+    // check whether everything is working before starting the web server. Don't want to find out in the middle of a transaction.
+    println!("Server public key {}",get_server_public_key_raw_hex());
+    println!("Bulletin board latest published root {:?}",get_bulletin_board().await.get_most_recent_published_root()?);
+    println!("{} users in the database",get_count_of_all_users().await?);
+    println!("Running demo webserver on http://localhost:8099 stop with control C.");
     HttpServer::new(move|| {
         actix_web::App::new()
             .wrap(middleware::Compress::default())
-            .service(get_server_public_key)
+            .service(get_server_public_key_hex)
+            .service(get_server_public_key_spki)
+            .service(get_server_public_key_raw)
             .service(new_registration)
             .service(get_user_list)
             .service(censor_leaf)
