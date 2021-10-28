@@ -2,7 +2,6 @@
 //! The file database_url should contain something like "mysql://bulletinboard:ThisShouldBeReplacedByAPassword@localhost:3306/bulletinboard" without the quotes, and with the password something sensible.
 //! The file bulletin_board_url should contain something like "mysql://bulletinboard:ThisShouldBeReplacedByAPassword@localhost:3306/bulletinboard" without the quotes, and with the password something sensible.
 
-use std::fs;
 use mysql::{Pool, PooledConn, Conn, Opts};
 use once_cell::sync::Lazy;
 use futures::lock::{Mutex, MutexGuard};
@@ -10,10 +9,10 @@ use merkle_tree_bulletin_board::backend_journal::{BackendJournal, StartupVerific
 use merkle_tree_bulletin_board_backend_mysql::BackendMysql;
 use merkle_tree_bulletin_board::BulletinBoard;
 use mysql::prelude::Queryable;
+use crate::config::CONFIG;
 
 fn get_rta_database_pool_raw() -> Pool {
-    let url = fs::read_to_string("database_url").expect("No file database_url");
-    let opts = Opts::from_url(&url).expect("Could not parse database_url url");
+    let opts = Opts::from_url(&CONFIG.database.rta).expect("Could not parse database_url url");
     Pool::new(opts).expect("Could not connect to database")
 }
 
@@ -25,8 +24,7 @@ pub async fn get_rta_database_connection() -> mysql::Result<PooledConn> {
 }
 
 fn get_bulletin_board_connection() -> Conn {
-    let url = fs::read_to_string("bulletin_board_url").expect("No file bulletin_board_url");
-    let opts = Opts::from_url(&url).expect("Could not parse bulletin_board_url url");
+    let opts = Opts::from_url(&CONFIG.database.bulletinboard).expect("Could not parse bulletin_board_url url");
     Conn::new(opts).expect("Could not connect to bulletin board database")
 }
 

@@ -6,13 +6,18 @@ use right_to_ask_api::person::{NewRegistration, get_list_of_all_users};
 use merkle_tree_bulletin_board::hash::HashValue;
 use right_to_ask_api::database::get_bulletin_board;
 use merkle_tree_bulletin_board::hash_history::{FullProof, HashInfo};
+use right_to_ask_api::signing::{get_server_public_key_base64encoded, ServerSigned};
 
 #[post("/new_registration")]
-async fn new_registration(command : Json<NewRegistration>) -> Json<Result<HashValue,String>> {
-    Json(command.register().await.map_err(|e|e.to_string()))
+async fn new_registration(command : Json<NewRegistration>) -> Json<Result<ServerSigned,String>> {
+    Json(ServerSigned::sign_string(command.register().await))
 }
 
-
+/// Get server public key, in base64 encoded SPKI format (PEM body).
+#[get("/get_server_public_key")]
+async fn get_server_public_key() -> Json<String> {
+    Json(get_server_public_key_base64encoded())
+}
 
 /// For testing only!
 #[get("/get_user_list")]
@@ -92,6 +97,7 @@ async fn main() -> anyhow::Result<()> {
     HttpServer::new(move|| {
         actix_web::App::new()
             .wrap(middleware::Compress::default())
+            .service(get_server_public_key)
             .service(new_registration)
             .service(get_user_list)
             .service(censor_leaf)

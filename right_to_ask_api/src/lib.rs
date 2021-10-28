@@ -1,6 +1,8 @@
 pub mod person;
 pub mod regions;
 pub mod database;
+pub mod signing;
+pub mod config;
 
 #[cfg(test)]
 mod tests {

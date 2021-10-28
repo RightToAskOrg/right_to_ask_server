@@ -46,17 +46,11 @@ FLUSH PRIVILEGES;
 EXIT
 ```
 
-### Telling the server how to connect.
+### Setting up configuration
 
-Create a file in the directory that you intend to run the server from called database_url 
-containing something like 
-```text
-mysql://RightToAsk:stick-the-rta-password-here@localhost:3306/RightToAsk
-```
-and similarly a file called bulletin_board_url containing something like 
-```text
-mysql://bulletinboard:stick-the-bulletin-board-password-here@localhost:3306/bulletinboard
-```
+Create a file `config.toml` in the directory that you intend to run the server
+as described in [config.md]
+
 
 ### Creating the database schema
 
@@ -74,8 +68,6 @@ be printed. Stop with control-C.
 ## Copyright
 
 This program is Copyright 2021 Thinking Cybersecurity Pty. Ltd. 
-
-Licenses subject to change soon.
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU Affero General Public License as published by

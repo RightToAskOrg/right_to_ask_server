@@ -14,12 +14,23 @@ function updateUserList() {
     getWebJSON("get_user_list",success,failure);
 }
 
+function check_signature(signed) {
+    const message = signed.message;
+    const signature = signed.signature;
+    function success(result) {
+        if (crypto && crypto.subtle) {
+            // actually can't do anything useful
+        }
+    }
+    getWebJSON("new_registration",success,failure)
+}
 
 function addUser() {
     function success(result) {
         console.log(result);
         if (result.Ok) {
-            status("Added user successfully. Bulletin Board hash "+result.Ok);
+            // check_signature(result.Ok);
+            status("Added user successfully. Bulletin Board hash "+result.Ok.message+" signature "+result.Ok.signature);
         } else {
             status("Tried to add user. Got Error message "+result.Err);
         }
