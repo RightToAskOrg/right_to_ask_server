@@ -7,6 +7,8 @@ use merkle_tree_bulletin_board::hash::HashValue;
 use right_to_ask_api::database::get_bulletin_board;
 use merkle_tree_bulletin_board::hash_history::{FullProof, HashInfo};
 use right_to_ask_api::signing::{get_server_public_key_base64encoded, ServerSigned, get_server_public_key_raw_hex, get_server_public_key_raw_base64};
+use actix_web::http::header::{ContentDisposition, DispositionType, DispositionParam};
+use actix_files::NamedFile;
 
 #[post("/new_registration")]
 async fn new_registration(command : Json<NewRegistration>) -> Json<Result<ServerSigned,String>> {
@@ -102,6 +104,17 @@ fn find_web_resources() -> PathBuf {
     panic!("Could not find WebResources. Please run in a directory containing it.")
 }
 
+#[get("/MPs.json")]
+async fn mps() -> std::io::Result<NamedFile> {
+    let file = NamedFile::open("data/MP_source/MPs.json")?;
+    Ok(file
+        .use_last_modified(true)
+        .set_content_disposition(ContentDisposition {
+            disposition: DispositionType::Attachment,
+            parameters: vec![DispositionParam::Filename("MPs.json".to_string())],
+        }))
+}
+
 
 #[actix_rt::main]
 async fn main() -> anyhow::Result<()> {
@@ -125,6 +138,7 @@ async fn main() -> anyhow::Result<()> {
             .service(get_hash_info)
             .service(get_proof_chain)
             .service(get_all_published_roots)
+            .service(mps)
             .service(actix_files::Files::new("/journal/", "journal").use_last_modified(true).use_etag(true).show_files_listing())
             .service(actix_files::Files::new("/", find_web_resources()).use_last_modified(true).use_etag(true).index_file("index.html"))
     })

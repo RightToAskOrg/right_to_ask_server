@@ -56,6 +56,10 @@ as described in [config.md]
 
 Initialize the two databases via the command `./target/release/initialize_databases`. 
 
+### Loading the list of MPs
+
+Download files and make `data/MP_source/MPs.json` by running `./target/release/update_mp_list_of_files`. This may be done by a server command later.
+
 ### Running the server
 
 ```bash

@@ -47,6 +47,7 @@ impl fmt::Display for Chamber {
 /// A generalized electorate, being a chamber, and the particular region for that chamber, unless the chamber has no regions.
 #[derive(Debug,Clone,Serialize,Deserialize,Eq,PartialEq)]
 pub struct Electorate {
-    chamber : Chamber,
-    location : Option<String>,
+    pub(crate) chamber : Chamber,
+	#[serde(skip_serializing_if = "Option::is_none",default)]
+    pub(crate) location : Option<String>,
 }
