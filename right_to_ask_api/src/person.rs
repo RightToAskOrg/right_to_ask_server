@@ -6,9 +6,9 @@ use serde::{Serialize,Deserialize};
 
 use crate::regions::{State, Electorate};
 use std::fmt;
-use mysql::{TxOpts};
+use mysql::{TxOpts, Value, FromValueError};
 use crate::database::{get_rta_database_connection, get_bulletin_board};
-use mysql::prelude::Queryable;
+use mysql::prelude::{Queryable, ConvIr, FromValue};
 use merkle_tree_bulletin_board::hash::HashValue;
 
 pub type PublicKey=String;
@@ -34,8 +34,8 @@ pub struct NewRegistration {
     public_key : PublicKey,
     #[serde(default,skip_serializing_if = "Option::is_none")]
     state : Option<State>,
-    #[serde(default,skip_serializing_if = "Option::is_none")]
-    electorates : Option<Vec<Electorate>>
+    #[serde(default,skip_serializing_if = "Vec::is_empty")]
+    electorates : Vec<Electorate>
 }
 
 #[derive(Debug,Clone,Copy,Serialize,Deserialize,Eq,PartialEq)]
@@ -48,6 +48,71 @@ pub enum RegistrationError {
     InternalError,
     CouldNotWriteToBulletinBoard,
 }
+
+#[derive(Debug,Clone,Serialize,Deserialize,Eq,PartialEq)]
+pub struct UserInfo {
+    uid : String,
+    #[serde(default,skip_serializing_if = "Option::is_none")]
+    display_name : Option<String>,
+    public_key : PublicKey,
+    #[serde(default,skip_serializing_if = "Option::is_none")]
+    state : Option<State>,
+    #[serde(default,skip_serializing_if = "Vec::is_empty")]
+    electorates : Vec<Electorate>,
+    badges : Vec<Badge>,
+}
+
+#[derive(Debug,Clone,Serialize,Deserialize,Eq,PartialEq)]
+/// What a badge represents.
+pub enum BadgeType {
+    EmailDomain,
+    MP,
+    MPStaff,
+}
+
+/// Some verification that someone has access to email.
+/// What is the domain for email, or MP name for MP
+#[derive(Debug,Clone,Serialize,Deserialize,Eq,PartialEq)]
+pub struct Badge {
+    badge : BadgeType,
+    what : String,
+}
+
+// Provide Display & to_string() for BadgeType enum
+impl fmt::Display for BadgeType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl From<BadgeType> for Value {
+    fn from(s: BadgeType) -> Self {
+        Value::Bytes(s.to_string().into_bytes())
+    }
+}
+
+impl ConvIr<BadgeType> for BadgeType {
+    fn new(v: Value) -> Result<Self, FromValueError> {
+        match v { // May have to deal with int and uint if it is an enumeration on the server.
+            Value::Bytes(bytes) => match bytes.as_slice() {
+                b"EmailDomain" => Ok(BadgeType::EmailDomain),
+                b"MP" => Ok(BadgeType::MP),
+                b"MPStaff" => Ok(BadgeType::MPStaff),
+                _ => Err(FromValueError(Value::Bytes(bytes))),
+            },
+            v => Err(FromValueError(v)),
+        }
+    }
+
+    fn commit(self) -> Self { self }
+    fn rollback(self) -> Value { self.into() }
+}
+
+impl FromValue for BadgeType {
+    type Intermediate = Self;
+}
+
+
 impl fmt::Display for RegistrationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:?}", self)
@@ -59,7 +124,9 @@ impl NewRegistration {
         let mut conn = get_rta_database_connection().await?;
         let mut tx = conn.start_transaction(TxOpts::default())?;
         tx.exec_drop("insert into USERS (UID,DisplayName,PublicKey,AusState) values (?,?,?,?)",(&self.uid,&self.display_name,&self.public_key,self.state.map(|s|s.to_string())))?;
-        // TODO do something about electorates.
+        for e in &self.electorates {
+            tx.exec_drop("insert into ELECTORATES (UID,Chamber,Electorate) values (?,?,?)",(&self.uid,&e.chamber.to_string(),&e.location))?;
+        }
         tx.commit()?;
         Ok(())
     }
@@ -100,6 +167,22 @@ pub async fn get_count_of_all_users() -> mysql::Result<usize> {
     let mut conn = get_rta_database_connection().await?;
     let elements : usize = conn.exec_first("SELECT COUNT(UID) from USERS",())?.unwrap();
     Ok(elements)
+}
+
+pub async fn get_user_by_id(uid:&str) -> mysql::Result<Option<UserInfo>> {
+    let mut conn = get_rta_database_connection().await?;
+    let electorates = conn.exec_map("SELECT Chamber,Electorate from ELECTORATES where UID=?",(uid,),|(chamber,location)|Electorate{ chamber,location })?;
+    let badges = conn.exec_map("SELECT badge,what from BADGES where UID=?",(uid,),|(badge,what)|Badge{ badge, what })?;
+    if let Some((display_name,state,public_key)) = conn.exec_first("SELECT DisplayName,AusState,PublicKey from USERS where UID=?",(uid,))? {
+        Ok(Some(UserInfo{
+            uid : uid.to_string(),
+            display_name,
+            public_key,
+            state,
+            electorates,
+            badges
+        }))
+    } else {Ok(None)}
 }
 
 

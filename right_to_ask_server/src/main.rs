@@ -2,7 +2,7 @@ use actix_web::{HttpServer, middleware, web};
 use actix_web::{get, post};
 use std::path::PathBuf;
 use actix_web::web::Json;
-use right_to_ask_api::person::{NewRegistration, get_list_of_all_users, get_count_of_all_users};
+use right_to_ask_api::person::{NewRegistration, get_list_of_all_users, get_count_of_all_users, UserInfo, get_user_by_id};
 use merkle_tree_bulletin_board::hash::HashValue;
 use right_to_ask_api::database::get_bulletin_board;
 use merkle_tree_bulletin_board::hash_history::{FullProof, HashInfo};
@@ -38,6 +38,16 @@ async fn get_server_public_key_raw() -> Json<String> {
 async fn get_user_list() -> Json<Result<Vec<String>,String>> {
     Json(get_list_of_all_users().await.map_err(|e|e.to_string()))
 }
+
+#[derive(serde::Deserialize)]
+struct QueryUser {
+    uid : String,
+}
+#[get("/get_user")]
+async fn get_user(query:web::Query<QueryUser>) -> Json<Result<Option<UserInfo>,String>> {
+    Json(get_user_by_id(&query.uid).await.map_err(|e|e.to_string()))
+}
+
 
 
 // Bulletin board api calls
@@ -131,6 +141,7 @@ async fn main() -> anyhow::Result<()> {
             .service(get_server_public_key_raw)
             .service(new_registration)
             .service(get_user_list)
+            .service(get_user)
             .service(censor_leaf)
             .service(get_parentless_unpublished_hash_values)
             .service(get_most_recent_published_root)

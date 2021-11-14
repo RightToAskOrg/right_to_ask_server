@@ -1,7 +1,9 @@
 "use strict";
 
 function showUser(div,user) {
-    div.innerText=user;
+    const a = add(div,"a");
+    a.innerText=user;
+    a.href = "get_user?uid="+encodeURIComponent(user);
 }
 function updateUserList() {
     function success(data) {
