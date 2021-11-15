@@ -29,7 +29,7 @@ create table if not exists ELECTORATES
                      'Tas_Legislative_Council',
                      'WA_Legislative_Assembly',
                      'WA_Legislative_Council') NOT NULL,
-    Electorate  VARCHAR(50) NOT NULL,
+    Electorate  VARCHAR(50),
     INDEX (UID)
 );
 
