@@ -53,7 +53,7 @@ fn parse_csv(file : File,chamber:Chamber,surname_heading:&str,first_name_heading
         let mp = MP {
             first_name: cols_firstname.iter().map(|&c|&record[c]).find(|s|!s.is_empty()).unwrap_or("").to_string(),
             surname: record[col_surname].to_string(),
-            electorate: Electorate { chamber, location: col_electorate.map(|c|record[c].to_string()) },
+            electorate: Electorate { chamber, region: col_electorate.map(|c|record[c].to_string()) },
             email: col_email.map(|c|&record[c]).unwrap_or("").to_string(),
             role: cols_role.iter().map(|&c|&record[c]).fold(String::new(),|s,r|if r.is_empty() {s} else {(if s.is_empty() {s} else {s+", "})+r}),
         };

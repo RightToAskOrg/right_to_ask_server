@@ -61,7 +61,7 @@ function addUser() {
     function describe_electorate(s) {
         let ss = s.split(",");
         if (ss.length===1) return { chamber : s };
-        if (ss.length===2) return { chamber : ss[0], location : ss[1] };
+        if (ss.length===2) return { chamber : ss[0], region : ss[1] };
         status("Illegal electorate "+s);
         return null;
     }

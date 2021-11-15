@@ -125,7 +125,7 @@ impl NewRegistration {
         let mut tx = conn.start_transaction(TxOpts::default())?;
         tx.exec_drop("insert into USERS (UID,DisplayName,PublicKey,AusState) values (?,?,?,?)",(&self.uid,&self.display_name,&self.public_key,self.state.map(|s|s.to_string())))?;
         for e in &self.electorates {
-            tx.exec_drop("insert into ELECTORATES (UID,Chamber,Electorate) values (?,?,?)",(&self.uid,&e.chamber.to_string(),&e.location))?;
+            tx.exec_drop("insert into ELECTORATES (UID,Chamber,Electorate) values (?,?,?)",(&self.uid,&e.chamber.to_string(),&e.region))?;
         }
         tx.commit()?;
         Ok(())
@@ -171,7 +171,7 @@ pub async fn get_count_of_all_users() -> mysql::Result<usize> {
 
 pub async fn get_user_by_id(uid:&str) -> mysql::Result<Option<UserInfo>> {
     let mut conn = get_rta_database_connection().await?;
-    let electorates = conn.exec_map("SELECT Chamber,Electorate from ELECTORATES where UID=?",(uid,),|(chamber,location)|Electorate{ chamber,location })?;
+    let electorates = conn.exec_map("SELECT Chamber,Electorate from ELECTORATES where UID=?",(uid,),|(chamber,location)|Electorate{ chamber, region: location })?;
     let badges = conn.exec_map("SELECT badge,what from BADGES where UID=?",(uid,),|(badge,what)|Badge{ badge, what })?;
     if let Some((display_name,state,public_key)) = conn.exec_first("SELECT DisplayName,AusState,PublicKey from USERS where UID=?",(uid,))? {
         Ok(Some(UserInfo{

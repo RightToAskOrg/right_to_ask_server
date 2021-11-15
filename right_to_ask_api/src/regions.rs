@@ -124,5 +124,5 @@ impl FromValue for Chamber {
 pub struct Electorate {
     pub(crate) chamber : Chamber,
 	#[serde(skip_serializing_if = "Option::is_none",default)]
-    pub(crate) location : Option<String>,
+    pub(crate) region: Option<String>,
 }
