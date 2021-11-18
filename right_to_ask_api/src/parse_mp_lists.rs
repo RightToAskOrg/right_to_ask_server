@@ -1,5 +1,6 @@
 //! Parse various files from parliament websites giving lists of MPs.
 
+// From datasources listed on https://github.com/RightToAskOrg/technical-docs/blob/main/ParliamentaryDataSources.md
 
 
 use tempfile::NamedTempFile;
@@ -11,6 +12,8 @@ use crate::regions::{Electorate, Chamber};
 use std::str::FromStr;
 use anyhow::anyhow;
 use std::collections::{HashMap, HashSet};
+use scraper::Selector;
+use itertools::Itertools;
 
 /// Temporary file directory. Should be in same filesystem as MP_SOURCE.
 const TEMP_DIR : &'static str = "data/temp";
@@ -64,7 +67,7 @@ fn parse_csv(file : File,chamber:Chamber,surname_heading:&str,first_name_heading
     Ok(mps)
 }
 
-/// A TJ operation takes a string, or rather an array of strings and other stuff. Extract just the string.
+/// A PDF TJ operation takes a string, or rather an array of strings and other stuff. Extract just the string. Also works for Tj
 fn extract_string(op:&pdf::content::Operation) -> String {
     let mut res = String::new();
     for o in &op.operands {
@@ -108,7 +111,7 @@ fn parse_australian_house_reps_pdf(path:&Path, electorates:&HashSet<String>) -> 
                         }
                         if !electorate.ends_with(",") { return Err(anyhow!("Electorate {} not ending in comma.",electorate)) }
                         let electorate = electorate.trim_end_matches(',').to_string();
-                        println!("Electorate {} email {}",electorate,email);
+                        // println!("Electorate {} email {}",electorate,email);
                         if electorate_to_email.contains_key(&electorate) { return Err(anyhow!("Duplicate Electorate {} found.",electorate)) }
                         electorate_to_email.insert(electorate,email);
                         history.clear();
@@ -168,7 +171,7 @@ impl ParseAustralianSenatePDFWork {
             else {
                 self.last_was_just_email=false;
                 if let Some((first,surname)) = self.current_name.take() {
-                    println!("Australian Senate First {} Surname {} email {}",first,surname,email);
+                    // println!("Australian Senate First {} Surname {} email {}",first,surname,email);
                     self.result.map.entry(surname).or_insert_with(||vec![]).push((first,email))
                 } else {
                     return Err(anyhow!("Email {} without prior recognisable name.",email));
@@ -238,6 +241,33 @@ fn parse_australian_senate_pdf(path:&Path) -> anyhow::Result<ParsedAustralianSen
     Ok(work.result)
 }
 
+fn parse_act_la(path:&Path) -> anyhow::Result<Vec<MP>> {
+    let mut mps = Vec::new();
+    let html = scraper::Html::parse_document(&std::fs::read_to_string(path)?);
+    let table = html.select(&Selector::parse("table > tbody").unwrap()).next().ok_or_else(||anyhow!("Could not find table in ACT html file"))?;
+    let select_td = Selector::parse("td").unwrap();
+    for tr in table.select(&Selector::parse("tr").unwrap()) {
+        let tds : Vec<_> = tr.select(&select_td).collect();
+        if tds.len()!=6 { return Err(anyhow!("Unexpected number of columns in ACT table"))}
+        let name = tds[0].text().next().ok_or_else(||anyhow!("Could not find name in ACT html file"))?.trim();
+        let role = tds[1].text().map(|t|t.trim()).join(", ");
+        let electorate = tds[2].text().next().ok_or_else(||anyhow!("Could not find electorate in ACT html file"))?.trim();
+        let email = tds[4].text().find(|t|t.trim().ends_with("act.gov.au")).ok_or_else(||anyhow!("Could not find email in ACT html file"))?.trim();
+        if let Some((surname,first_name)) = name.split_once(',') {
+            // println!("name : {} electorate {} email {} role {}",name,electorate,email,role);
+            let mp = MP{
+                first_name: first_name.trim().to_string(),
+                surname: surname.trim().to_string(),
+                electorate: Electorate { chamber: Chamber::ACT_Legislative_Assembly, region: Some(electorate.to_string()) },
+                email: email.to_string(),
+                role
+            };
+            mps.push(mp);
+        } else { return Err(anyhow!("Name {} does not contain a comma in ACT table",name))}
+    }
+    Ok(mps)
+}
+
 fn extract_electorates(mps : &[MP]) -> anyhow::Result<HashSet<String>> {
     mps.iter().map(|mp|mp.electorate.region.as_ref().map(|s|s.to_string()).ok_or_else(||anyhow!("Missing electorate"))).collect()
 }
@@ -269,7 +299,14 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     let lc = download_to_file("https://www.parliament.nsw.gov.au/_layouts/15/NSWParliament/memberlistservice.aspx?members=LA&format=Excel").await?;
     parse_nsw_lc(lc.reopen()?)?;
     lc.persist(dir.join(Chamber::NSW_Legislative_Council.to_string()+".csv"))?;
+
+    // ACT
+    let la = download_to_file("https://www.parliament.act.gov.au/members/members-of-the-assembly").await?;
+    parse_act_la(la.path())?;
+    la.persist(dir.join(Chamber::ACT_Legislative_Assembly.to_string()+".html"))?;
+
     Ok(())
+
 }
 
 /// Create "data/MP_source/MPs.json" from the source files downloaded by update_mp_list_of_files()
@@ -290,10 +327,13 @@ pub fn create_mp_list() -> anyhow::Result<()> {
         }
         mps.extend(reps_from_csvs);
     }
-    //mps.extend(parse_australian_house_reps(File::open(dir.join(Chamber::Australian_House_Of_Representatives.to_string()+".csv"))?)?);
-    //mps.extend(parse_australian_senate(File::open(dir.join(Chamber::Australian_Senate.to_string()+".csv"))?)?);
-    mps.extend(parse_nsw_la(File::open(dir.join(Chamber::NSW_Legislative_Assembly.to_string()+".csv"))?)?);
-    mps.extend(parse_nsw_lc(File::open(dir.join(Chamber::NSW_Legislative_Council.to_string()+".csv"))?)?);
+    { // Deal with Assembly of the ACT
+        mps.extend(parse_act_la(&dir.join(Chamber::ACT_Legislative_Assembly.to_string()+".html"))?);
+    }
+    { // Deal with NSW
+        mps.extend(parse_nsw_la(File::open(dir.join(Chamber::NSW_Legislative_Assembly.to_string()+".csv"))?)?);
+        mps.extend(parse_nsw_lc(File::open(dir.join(Chamber::NSW_Legislative_Council.to_string()+".csv"))?)?);
+    }
     serde_json::to_writer(File::create(dir.join("MPs.json"))?,&mps)?;
     Ok(())
 }
