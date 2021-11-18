@@ -33,25 +33,26 @@ async fn download_to_file(url:&str) -> anyhow::Result<NamedTempFile> {
 }
 
 fn parse_australian_senate(file : File) -> anyhow::Result<Vec<MP>> {
-    parse_csv(file, Chamber::Australian_Senate, "Surname", &["Preferred Name", "First Name"], None, Some("State"), &["Parliamentary Titles"])
+    parse_csv(file, Chamber::Australian_Senate, "Surname", &["Preferred Name", "First Name"], None, Some("State"), &["Parliamentary Titles"],"Political Party")
 }
 fn parse_australian_house_reps(file : File) -> anyhow::Result<Vec<MP>> {
-    parse_csv(file, Chamber::Australian_House_Of_Representatives, "Surname", &["Preferred Name", "First Name"], None, Some("Electorate"), &["Parliamentary Title", "Ministerial Title"])
+    parse_csv(file, Chamber::Australian_House_Of_Representatives, "Surname", &["Preferred Name", "First Name"], None, Some("Electorate"), &["Parliamentary Title", "Ministerial Title"],"Political Party")
 }
 fn parse_nsw_la(file : File) -> anyhow::Result<Vec<MP>> {
-    parse_csv(file, Chamber::NSW_Legislative_Assembly, "SURNAME", &["INITIALS"], Some("CONTACT ADDRESS EMAIL"), Some("ELECTORATE"), &["MINISTRY", "OFFICE HOLDER"])
+    parse_csv(file, Chamber::NSW_Legislative_Assembly, "SURNAME", &["INITIALS"], Some("CONTACT ADDRESS EMAIL"), Some("ELECTORATE"), &["MINISTRY", "OFFICE HOLDER"],"PARTY")
 }
 fn parse_nsw_lc(file : File) -> anyhow::Result<Vec<MP>> {
-    parse_csv(file, Chamber::NSW_Legislative_Council, "SURNAME", &["INITIALS"], Some("CONTACT ADDRESS EMAIL"), None, &["MINISTRY", "OFFICE HOLDER"])
+    parse_csv(file, Chamber::NSW_Legislative_Council, "SURNAME", &["INITIALS"], Some("CONTACT ADDRESS EMAIL"), None, &["MINISTRY", "OFFICE HOLDER"],"PARTY")
 }
 
 /// Parse a CSV file of contacts, given the headings
-fn parse_csv(file : File,chamber:Chamber,surname_heading:&str,first_name_heading:&[&str],email_heading:Option<&str>,electorate_heading:Option<&str>,role_heading:&[&str]) -> anyhow::Result<Vec<MP>> {
+fn parse_csv(file : File,chamber:Chamber,surname_heading:&str,first_name_heading:&[&str],email_heading:Option<&str>,electorate_heading:Option<&str>,role_heading:&[&str],party_heading:&str) -> anyhow::Result<Vec<MP>> {
     let mut reader = csv::Reader::from_reader(file);
     let mut mps = Vec::new();
     let headings = reader.headers()?;
     let find_heading = |name:&str|{headings.iter().position(|e|e==name)}.ok_or_else(||anyhow!("No column header {} for surname for {}",surname_heading,chamber));
     let col_surname = find_heading(surname_heading)?;
+    let col_party = find_heading(party_heading)?;
     let cols_firstname : Vec<usize> = first_name_heading.into_iter().map(|&s|find_heading(s)).collect::<anyhow::Result<Vec<usize>>>()?;
     let cols_role : Vec<usize> = role_heading.into_iter().map(|&s|find_heading(s)).collect::<anyhow::Result<Vec<usize>>>()?;
     let col_electorate : Option<usize> = electorate_heading.map(find_heading).transpose()?;
@@ -63,7 +64,8 @@ fn parse_csv(file : File,chamber:Chamber,surname_heading:&str,first_name_heading
             surname: record[col_surname].to_string(),
             electorate: Electorate { chamber, region: col_electorate.map(|c|record[c].to_string()) },
             email: col_email.map(|c|&record[c]).unwrap_or("").to_string(),
-            role: cols_role.iter().map(|&c|&record[c]).fold(String::new(),|s,r|if r.is_empty() {s} else {(if s.is_empty() {s} else {s+", "})+r}),
+            role: cols_role.iter().map(|&c|&record[c]).fold(String::new(),|s,r|if r.is_empty() {s} else {(if s.is_empty() {s} else {s+"; "})+r}),
+            party: record[col_party].to_string(),
         };
         mps.push(mp);
     }
@@ -232,8 +234,9 @@ fn parse_act_la(path:&Path) -> anyhow::Result<Vec<MP>> {
         let tds : Vec<_> = tr.select(&select_td).collect();
         if tds.len()!=6 { return Err(anyhow!("Unexpected number of columns in ACT table"))}
         let name = tds[0].text().next().ok_or_else(||anyhow!("Could not find name in ACT html file"))?.trim();
-        let role = tds[1].text().map(|t|t.trim()).join(", ");
+        let role = tds[1].text().map(|t|t.trim()).join("; ");
         let electorate = tds[2].text().next().ok_or_else(||anyhow!("Could not find electorate in ACT html file"))?.trim();
+        let party = tds[3].text().next().ok_or_else(||anyhow!("Could not find party in ACT html file"))?.trim();
         let email = tds[4].text().find(|t|t.trim().ends_with("act.gov.au")).ok_or_else(||anyhow!("Could not find email in ACT html file"))?.trim();
         if let Some((surname,first_name)) = name.split_once(',') {
             // println!("name : {} electorate {} email {} role {}",name,electorate,email,role);
@@ -242,7 +245,8 @@ fn parse_act_la(path:&Path) -> anyhow::Result<Vec<MP>> {
                 surname: surname.trim().to_string(),
                 electorate: Electorate { chamber: Chamber::ACT_Legislative_Assembly, region: Some(electorate.to_string()) },
                 email: email.to_string(),
-                role
+                role,
+                party : party.to_string(),
             };
             mps.push(mp);
         } else { return Err(anyhow!("Name {} does not contain a comma in ACT table",name))}
@@ -259,8 +263,9 @@ fn parse_nt_la_pdf(path:&Path) -> anyhow::Result<Vec<MP>> {
     let mut found_name : Option<(String,String)> = None;
     let mut roles : Vec<String> = vec![];
     let mut electorate : Option<String> = None;
+    let mut party : Option<String> = None;
     for s in strings {
-        //println!("** {}",s);
+        // println!("** {}",s);
         if let Some(cap) = surname_firstname.captures(&s) {
             found_name=Some((cap[1].to_string(),cap[2].to_string()));
         } else if found_name.is_some() {
@@ -277,8 +282,14 @@ fn parse_nt_la_pdf(path:&Path) -> anyhow::Result<Vec<MP>> {
                         if lower_case_and_without_whitespace.starts_with(lower_case_electorate) {
                             let mut togo = lower_case_electorate.len();
                             electorate = Some(h.chars().take_while(|c|togo>0 && (c.is_whitespace()||{ togo-=1; true})).collect());
+                            let h=h[electorate.as_ref().unwrap().len()..].trim_start();
+                            party = Some(if let Some(party_pos) = h.find("Party") {
+                                h[..party_pos+5].to_string()
+                            } else {
+                                h.chars().take_while(|c|!c.is_whitespace()).collect() // probably Independent, but maybe something else...
+                            });
                             break;
-                        } else { roles.push(h.to_string() )}
+                        } else if h.len()>0 { roles.push(h.to_string() )}
                     }
                 } else {
                     let (surname,first_name) = found_name.take().unwrap();
@@ -288,8 +299,9 @@ fn parse_nt_la_pdf(path:&Path) -> anyhow::Result<Vec<MP>> {
                         electorate: Electorate { chamber: Chamber::NT_Legislative_Assembly, region: Some(electorate.take().ok_or_else(||anyhow!("No NT electorate found"))?) },
                         email: email.to_string(),
                         role: roles.join("; "),
+                        party: party.take().ok_or_else(||anyhow!("No NT party found"))?,
                     };
-                    // println!("{}",mp);
+                    println!("{}",mp);
                     mps.push(mp);
                     history.clear();
                     roles.clear();
@@ -312,7 +324,7 @@ fn parse_qld_parliament(path: &Path)  -> anyhow::Result<Vec<MP>> {
             let col_electorate = hcol("electorate")?;
             let col_role = hcol("portfolio")?;
             let col_email = hcol("Email address")?;
-            // let col_party = hcol("party")?;
+            let col_party = hcol("party")?;
             for row in iter {
                 let cell = |col:usize| row.get(col).ok_or_else(||anyhow!("Missing data in column {} for QLD",col)).map(|v|v.to_string());
                 let mp = MP{
@@ -321,6 +333,7 @@ fn parse_qld_parliament(path: &Path)  -> anyhow::Result<Vec<MP>> {
                     electorate: Electorate { chamber: Chamber::Qld_Legislative_Assembly, region: Some(cell(col_electorate)?.trim_start_matches("Member for ").to_string()) },
                     email: cell(col_email)?,
                     role: cell(col_role)?,
+                    party: cell(col_party)?,
                 };
                 // println!("{}",mp);
                 mps.push(mp);

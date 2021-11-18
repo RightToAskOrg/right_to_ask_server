@@ -16,6 +16,7 @@ pub struct MP {
     pub electorate : Electorate,
     pub email : String,
     pub role : String,
+    pub party : String,
 }
 
 impl MP {
@@ -23,6 +24,6 @@ impl MP {
 
 impl Display for MP {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}, {} electorate {} {} {}", self.surname, self.first_name,self.electorate,self.email,self.role)
+        write!(f, "{}, {} party {} electorate {} {} {}", self.surname, self.first_name,self.party,self.electorate,self.email,self.role)
     }
 }
