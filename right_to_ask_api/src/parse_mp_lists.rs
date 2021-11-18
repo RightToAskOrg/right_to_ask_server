@@ -16,6 +16,7 @@ use scraper::Selector;
 use itertools::Itertools;
 use crate::parse_pdf_util::{parse_pdf_to_strings_with_same_font, extract_string};
 use regex::Regex;
+use calamine::{open_workbook, Xls, Reader};
 
 /// Temporary file directory. Should be in same filesystem as MP_SOURCE.
 const TEMP_DIR : &'static str = "data/temp";
@@ -299,6 +300,36 @@ fn parse_nt_la_pdf(path:&Path) -> anyhow::Result<Vec<MP>> {
     Ok(mps)
 }
 
+fn parse_qld_parliament(path: &Path)  -> anyhow::Result<Vec<MP>> {
+    let mut mps = Vec::new();
+    let mut doc : Xls<_> = open_workbook(path)?;
+    for (_,sheet) in &doc.worksheets() {
+        let mut iter = sheet.rows();
+        if let Some(headings) = iter.next() {
+            let hcol = |title:&str| headings.iter().position(|v|title==&v.to_string()).ok_or_else(||anyhow!("Could not find QLD column heading {}",title));
+            let col_first = hcol("first")?;
+            let col_last = hcol("last")?;
+            let col_electorate = hcol("electorate")?;
+            let col_role = hcol("portfolio")?;
+            let col_email = hcol("Email address")?;
+            // let col_party = hcol("party")?;
+            for row in iter {
+                let cell = |col:usize| row.get(col).ok_or_else(||anyhow!("Missing data in column {} for QLD",col)).map(|v|v.to_string());
+                let mp = MP{
+                    first_name: cell(col_first)?,
+                    surname: cell(col_last)?.trim_end_matches(" MP").to_string(),
+                    electorate: Electorate { chamber: Chamber::Qld_Legislative_Assembly, region: Some(cell(col_electorate)?.trim_start_matches("Member for ").to_string()) },
+                    email: cell(col_email)?,
+                    role: cell(col_role)?,
+                };
+                // println!("{}",mp);
+                mps.push(mp);
+            }
+        }
+    }
+    Ok(mps)
+}
+
 fn extract_electorates(mps : &[MP]) -> anyhow::Result<HashSet<String>> {
     mps.iter().map(|mp|mp.electorate.region.as_ref().map(|s|s.to_string()).ok_or_else(||anyhow!("Missing electorate"))).collect()
 }
@@ -308,6 +339,12 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     std::fs::create_dir_all(TEMP_DIR)?;
     std::fs::create_dir_all(MP_SOURCE)?;
     let dir = PathBuf::from_str(MP_SOURCE)?;
+
+    //return Err(anyhow!("testing"));
+    // QLD
+    let qld_members = download_to_file("https://documents.parliament.qld.gov.au/Members/mailingLists/MEMMERGEEXCEL.xls").await?;
+    parse_qld_parliament(qld_members.path())?;
+    qld_members.persist(dir.join(Chamber::Qld_Legislative_Assembly.to_string()+".xls"))?;
     // NT
     let nt_members = download_to_file("https://parliament.nt.gov.au/__data/assets/pdf_file/0004/932971/MASTER-List-of-Members-Fourteenth-Assembly-as-at-September-2021.pdf").await?;
     parse_nt_la_pdf(nt_members.path())?;
@@ -372,6 +409,9 @@ pub fn create_mp_list() -> anyhow::Result<()> {
     }
     { // Deal with NT
         mps.extend(parse_nt_la_pdf(&dir.join(Chamber::NT_Legislative_Assembly.to_string()+".pdf"))?);
+    }
+    { // Deal with QLD
+        mps.extend(parse_qld_parliament(&dir.join(Chamber::Qld_Legislative_Assembly.to_string()+".xls"))?);
     }
     serde_json::to_writer(File::create(dir.join("MPs.json"))?,&mps)?;
     Ok(())
