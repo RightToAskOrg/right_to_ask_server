@@ -14,6 +14,8 @@ use anyhow::anyhow;
 use std::collections::{HashMap, HashSet};
 use scraper::Selector;
 use itertools::Itertools;
+use crate::parse_pdf_util::{parse_pdf_to_strings_with_same_font, extract_string};
+use regex::Regex;
 
 /// Temporary file directory. Should be in same filesystem as MP_SOURCE.
 const TEMP_DIR : &'static str = "data/temp";
@@ -65,27 +67,6 @@ fn parse_csv(file : File,chamber:Chamber,surname_heading:&str,first_name_heading
         mps.push(mp);
     }
     Ok(mps)
-}
-
-/// A PDF TJ operation takes a string, or rather an array of strings and other stuff. Extract just the string. Also works for Tj
-fn extract_string(op:&pdf::content::Operation) -> String {
-    let mut res = String::new();
-    for o in &op.operands {
-        if let Ok(a) = o.as_array() {
-            for p in a {
-                if let Ok(s) = p.as_string() {
-                    if let Ok(s) = s.as_str() {
-                        res.push_str(&s);
-                    }
-                }
-            }
-        } else if let Ok(s) = o.as_string() {
-            if let Ok(s) = s.as_str() {
-                res.push_str(&s);
-            }
-        }
-    }
-    res
 }
 
 /// Parse the PDF file of house of reps containing emails. Warning - brittle!
@@ -268,6 +249,56 @@ fn parse_act_la(path:&Path) -> anyhow::Result<Vec<MP>> {
     Ok(mps)
 }
 
+fn parse_nt_la_pdf(path:&Path) -> anyhow::Result<Vec<MP>> {
+    let mut mps = Vec::new();
+    let strings = parse_pdf_to_strings_with_same_font(path)?;
+    let mut history : Vec<String> = Vec::new();
+    // for s in strings { println!("** {:?}",s);}
+    let surname_firstname = Regex::new(r"^\d+\.\s*([^,]+),\s*\S+\s+([^,]+),\s*MLA\s*$").unwrap(); // extract a surname and firstname
+    let mut found_name : Option<(String,String)> = None;
+    let mut roles : Vec<String> = vec![];
+    let mut electorate : Option<String> = None;
+    for s in strings {
+        //println!("** {}",s);
+        if let Some(cap) = surname_firstname.captures(&s) {
+            found_name=Some((cap[1].to_string(),cap[2].to_string()));
+        } else if found_name.is_some() {
+            let emails = s.split_whitespace().filter(|w|w.contains("@nt.gov.au")).map(|s|s.to_string()).collect::<Vec<_>>();
+            history.push(s);
+            for email in emails {
+                // println!("Email {}",email);
+                if email.starts_with("electorate.") {
+                    let lower_case_electorate = email.trim().trim_start_matches("electorate.").trim_end_matches("@nt.gov.au");
+                    for h in &history {
+                        let h = h.trim();
+                        let mut lower_case_and_without_whitespace = h.to_lowercase();
+                        lower_case_and_without_whitespace.retain(|c| !c.is_whitespace());
+                        if lower_case_and_without_whitespace.starts_with(lower_case_electorate) {
+                            let mut togo = lower_case_electorate.len();
+                            electorate = Some(h.chars().take_while(|c|togo>0 && (c.is_whitespace()||{ togo-=1; true})).collect());
+                            break;
+                        } else { roles.push(h.to_string() )}
+                    }
+                } else {
+                    let (surname,first_name) = found_name.take().unwrap();
+                    let mp = MP{
+                        first_name,
+                        surname,
+                        electorate: Electorate { chamber: Chamber::NT_Legislative_Assembly, region: Some(electorate.take().ok_or_else(||anyhow!("No NT electorate found"))?) },
+                        email: email.to_string(),
+                        role: roles.join("; "),
+                    };
+                    // println!("{}",mp);
+                    mps.push(mp);
+                    history.clear();
+                    roles.clear();
+                }
+            }
+        }
+    }
+    Ok(mps)
+}
+
 fn extract_electorates(mps : &[MP]) -> anyhow::Result<HashSet<String>> {
     mps.iter().map(|mp|mp.electorate.region.as_ref().map(|s|s.to_string()).ok_or_else(||anyhow!("Missing electorate"))).collect()
 }
@@ -277,6 +308,11 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     std::fs::create_dir_all(TEMP_DIR)?;
     std::fs::create_dir_all(MP_SOURCE)?;
     let dir = PathBuf::from_str(MP_SOURCE)?;
+    // NT
+    let nt_members = download_to_file("https://parliament.nt.gov.au/__data/assets/pdf_file/0004/932971/MASTER-List-of-Members-Fourteenth-Assembly-as-at-September-2021.pdf").await?;
+    parse_nt_la_pdf(nt_members.path())?;
+    nt_members.persist(dir.join(Chamber::NT_Legislative_Assembly.to_string()+".pdf"))?;
+
     // Federal CSVs.
     let house_reps = download_to_file("https://www.aph.gov.au/-/media/03_Senators_and_Members/Address_Labels_and_CSV_files/FamilynameRepsCSV.csv").await?;
     let australian_house_reps_res = parse_australian_house_reps(house_reps.reopen()?)?;
@@ -333,6 +369,9 @@ pub fn create_mp_list() -> anyhow::Result<()> {
     { // Deal with NSW
         mps.extend(parse_nsw_la(File::open(dir.join(Chamber::NSW_Legislative_Assembly.to_string()+".csv"))?)?);
         mps.extend(parse_nsw_lc(File::open(dir.join(Chamber::NSW_Legislative_Council.to_string()+".csv"))?)?);
+    }
+    { // Deal with NT
+        mps.extend(parse_nt_la_pdf(&dir.join(Chamber::NT_Legislative_Assembly.to_string()+".pdf"))?);
     }
     serde_json::to_writer(File::create(dir.join("MPs.json"))?,&mps)?;
     Ok(())

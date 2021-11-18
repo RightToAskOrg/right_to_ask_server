@@ -6,6 +6,7 @@ use serde::{Serialize,Deserialize};
 use std::fmt;
 use mysql::prelude::{FromValue, ConvIr};
 use mysql::{Value, FromValueError};
+use std::fmt::{Display, Formatter};
 
 #[derive(Debug,Clone,Copy,Serialize,Deserialize,Eq,PartialEq)]
 pub enum State {
@@ -125,4 +126,14 @@ pub struct Electorate {
     pub(crate) chamber : Chamber,
 	#[serde(skip_serializing_if = "Option::is_none",default)]
     pub(crate) region: Option<String>,
+}
+
+impl Display for Electorate {
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+		if let Some(region) = &self.region {
+			write!(f, "{} in {}", region, self.chamber)
+		} else {
+			write!(f, "{}", self.chamber)
+		}
+	}
 }

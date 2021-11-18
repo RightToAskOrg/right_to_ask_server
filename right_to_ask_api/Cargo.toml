@@ -25,5 +25,6 @@ tempfile = "3.2"
 pdf = "0.7"
 scraper = "0.12"
 itertools = "0.10"
+regex = "1"
 # Just used for binaries. May be removed in future.
 tokio = { version = "1", features = ["full"] }
