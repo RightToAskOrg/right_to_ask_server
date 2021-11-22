@@ -16,7 +16,7 @@ use scraper::Selector;
 use itertools::Itertools;
 use crate::parse_pdf_util::{parse_pdf_to_strings_with_same_font, extract_string};
 use regex::Regex;
-use calamine::{open_workbook, Xls, Reader};
+use calamine::{open_workbook, Xls, Reader, Xlsx};
 
 /// Temporary file directory. Should be in same filesystem as MP_SOURCE.
 const TEMP_DIR : &'static str = "data/temp";
@@ -44,6 +44,13 @@ fn parse_nsw_la(file : File) -> anyhow::Result<Vec<MP>> {
 fn parse_nsw_lc(file : File) -> anyhow::Result<Vec<MP>> {
     parse_csv(file, Chamber::NSW_Legislative_Council, "SURNAME", &["INITIALS"], Some("CONTACT ADDRESS EMAIL"), None, &["MINISTRY", "OFFICE HOLDER"],"PARTY")
 }
+fn parse_vic_la(file : File) -> anyhow::Result<Vec<MP>> {
+    parse_csv(file, Chamber::Vic_Legislative_Assembly, "LastName", &["PreferredName"], Some("Email"), Some("Electorate"), &["Minister", "Position"],"Party")
+}
+fn parse_vic_lc(file : File) -> anyhow::Result<Vec<MP>> {
+    parse_csv(file, Chamber::Vic_Legislative_Council, "LastName", &["PreferredName"], Some("Email"), Some("Electorate"), &["Minister", "Position"],"Party")
+}
+
 
 /// Parse a CSV file of contacts, given the headings
 fn parse_csv(file : File,chamber:Chamber,surname_heading:&str,first_name_heading:&[&str],email_heading:Option<&str>,electorate_heading:Option<&str>,role_heading:&[&str],party_heading:&str) -> anyhow::Result<Vec<MP>> {
@@ -67,6 +74,7 @@ fn parse_csv(file : File,chamber:Chamber,surname_heading:&str,first_name_heading
             role: cols_role.iter().map(|&c|&record[c]).fold(String::new(),|s,r|if r.is_empty() {s} else {(if s.is_empty() {s} else {s+"; "})+r}),
             party: record[col_party].to_string(),
         };
+        // println!("{}",mp);
         mps.push(mp);
     }
     Ok(mps)
@@ -256,6 +264,44 @@ fn parse_act_la(path:&Path) -> anyhow::Result<Vec<MP>> {
 }
 
 
+/// Parse WA both houses
+fn parse_wa(path:&Path,chamber:Chamber) -> anyhow::Result<Vec<MP>> {
+    let mut mps = Vec::new();
+    let html = scraper::Html::parse_document(&std::fs::read_to_string(path)?);
+    let table = html.select(&Selector::parse("table > tbody").unwrap()).next().ok_or_else(||anyhow!("Could not find table in WA html file"))?;
+    let select_td = Selector::parse("td").unwrap();
+    for tr in table.select(&Selector::parse("tr").unwrap()) {
+        let tds : Vec<_> = tr.select(&select_td).collect();
+        if tds.len()!=3 { return Err(anyhow!("Unexpected number of columns in WA table"))}
+        let mut member = tds[0].text();
+        let first_name = member.next().ok_or_else(||anyhow!("Could not find first name in WA html file"))?.trim().trim_start_matches("Hon. ").trim_start_matches("Mr ").trim_start_matches("Ms ").trim_start_matches("Dr ").trim_start_matches("Ms ").to_string();
+        let surname = member.next().ok_or_else(||anyhow!("Could not find surname in WA html file"))?.trim().to_string();
+        let mut party : Option<String> = None;
+        let mut roles : Vec<String> = Vec::new();
+        for s in member {
+            let s = s.trim();
+            if s.is_empty() || s=="MLA" || s=="MLC" {}
+            else if s.starts_with("Party: ") { party=Some(s.trim_start_matches("Party: ").trim().to_string())}
+            else { roles.push(s.to_string()); }
+        }
+        let electorate = tds[1].text().next().ok_or_else(||anyhow!("Could not find electorate in WA html file"))?.trim();
+        let email = tds[2].text().find(|t|t.trim().trim_end_matches(".").ends_with("@mp.wa.gov.au")).ok_or_else(||anyhow!("Could not find email in WA html file"))?.trim().trim_end_matches(".").to_string(); // Jodie Hanns has an extra period at the end of her email address.
+        let mp = MP{
+            first_name,
+            surname,
+            electorate: Electorate { chamber, region: Some(electorate.to_string()) },
+            email,
+            role : roles.join("; "),
+            party : party.ok_or_else(||anyhow!("Could not find party in WA html file"))?,
+        };
+        // println!("{}",mp);
+        mps.push(mp);
+    }
+    Ok(mps)
+}
+
+
+
 /// parse NT legislative assembly.
 fn parse_nt_la_pdf(path:&Path) -> anyhow::Result<Vec<MP>> {
     let mut mps = Vec::new();
@@ -304,7 +350,7 @@ fn parse_nt_la_pdf(path:&Path) -> anyhow::Result<Vec<MP>> {
                         role: roles.join("; "),
                         party: party.take().ok_or_else(||anyhow!("No NT party found"))?,
                     };
-                    println!("{}",mp);
+                    // println!("{}",mp);
                     mps.push(mp);
                     history.clear();
                     roles.clear();
@@ -362,8 +408,49 @@ fn parse_sa(file:File,chamber:Chamber) -> anyhow::Result<Vec<MP>> {
             role: field("positions")?.as_array().ok_or_else(||anyhow!("SA Json file position field not array")).and_then(|v|v.iter().map(|e|e.as_str().map(|s|s.to_string()).ok_or_else(||anyhow!("SA Json file position entry not string"))).collect::<anyhow::Result<Vec<String>>>())?.join("; "),
             party: string_field("politicalPartyName")?
         };
-        println!("{}",mp);
+        //println!("{}",mp);
         mps.push(mp);
+    }
+    Ok(mps)
+}
+
+fn parse_tas(path:&Path,chamber:Chamber) -> anyhow::Result<Vec<MP>> {
+    let mut mps : Vec<MP> = Vec::new();
+    let mut doc : Xlsx<_> = open_workbook(path)?;
+    for (_,sheet) in &doc.worksheets() {
+        let mut iter = sheet.rows();
+        if let Some(headings) = iter.next() {
+            let hcol = |title:&str| headings.iter().position(|v|title==&v.to_string().to_lowercase()).ok_or_else(||anyhow!("Could not find TAS column heading {}",title));
+            let col_first = hcol("first")?;
+            let col_last = hcol("last")?;
+            let col_electorate = hcol("electorate")?;
+            let col_role = hcol("portfolio")?;
+            let col_email = hcol("email address")?;
+            let col_party = hcol("party")?;
+            for row in iter {
+                let cell = |col:usize| row.get(col).ok_or_else(||anyhow!("Missing data in column {} for TAS",col)).map(|v|v.to_string());
+                let electorate = cell(col_electorate)?.trim().trim_start_matches("Member for ").to_string();
+                let empty_electorate = electorate.is_empty();
+                let mp = MP{
+                    first_name: cell(col_first)?,
+                    surname: cell(col_last)?.trim_end_matches(" MP").trim_end_matches(" MLC").to_string(),
+                    electorate: Electorate { chamber, region: Some(electorate) },
+                    email: cell(col_email)?,
+                    role: cell(col_role)?,
+                    party: cell(col_party)?,
+                };
+                if empty_electorate {
+                    if let Some(last) = mps.last_mut() {
+                        if last.surname==mp.surname && last.first_name==mp.first_name {// just additional role
+                            last.role=if last.role.is_empty() { mp.role } else { last.role.to_string()+"; "+&mp.role};
+                        } else { return Err(anyhow!("Empty electorate for TAS with different prior person.")); }
+                    } else { return Err(anyhow!("Empty electorate for TAS as first entry.")); }
+                } else {
+                    //println!("{}",mp);
+                    mps.push(mp);
+                }
+            }
+        }
     }
     Ok(mps)
 }
@@ -380,6 +467,30 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     std::fs::create_dir_all(MP_SOURCE)?;
     let dir = PathBuf::from_str(MP_SOURCE)?;
 
+    // WA
+    let la = download_to_file("https://www.parliament.wa.gov.au/parliament/memblist.nsf/WebCurrentMembLA?OpenView").await?;
+    parse_wa(la.path(),Chamber::WA_Legislative_Assembly)?;
+    la.persist(dir.join(Chamber::WA_Legislative_Assembly.to_string()+".html"))?;
+    let lc = download_to_file("https://www.parliament.wa.gov.au/parliament/memblist.nsf/WebCurrentMembLC?OpenView").await?;
+    parse_wa(lc.path(),Chamber::WA_Legislative_Council)?;
+    lc.persist(dir.join(Chamber::WA_Legislative_Council.to_string()+".html"))?;
+
+    // VIC
+    let la = download_to_file("https://www.parliament.vic.gov.au/images/members/assemblymembers.csv").await?;
+    parse_vic_la(la.reopen()?)?;
+    la.persist(dir.join(Chamber::Vic_Legislative_Assembly.to_string()+".csv"))?;
+    let lc = download_to_file("https://www.parliament.vic.gov.au/images/members/councilmembers.csv").await?;
+    parse_vic_lc(lc.reopen()?)?;
+    lc.persist(dir.join(Chamber::Vic_Legislative_Council.to_string()+".csv"))?;
+
+    // TAS
+    let ha = download_to_file("https://www.parliament.tas.gov.au/Members/HAMembers.xlsx").await?;
+    parse_tas(ha.path(),Chamber::Tas_House_Of_Assembly)?;
+    ha.persist(dir.join(Chamber::Tas_House_Of_Assembly.to_string()+".xlsx"))?;
+    let lc = download_to_file("https://www.parliament.tas.gov.au/members/lcMembers.xlsx").await?;
+    parse_tas(lc.path(),Chamber::Tas_Legislative_Council)?;
+    lc.persist(dir.join(Chamber::Tas_Legislative_Council.to_string()+".xlsx"))?;
+
     // SA
     let ha = download_to_file("https://contact-details-api.parliament.sa.gov.au/api/HAMembersDetails").await?;  // TODO Not URL in md doc
     parse_sa(ha.reopen()?,Chamber::SA_Legislative_Assembly)?;
@@ -388,7 +499,6 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     parse_sa(lc.reopen()?,Chamber::SA_Legislative_Council)?;
     lc.persist(dir.join(Chamber::SA_Legislative_Council.to_string()+".json"))?;
 
-    // return Err(anyhow!("testing"));
     // QLD
     let qld_members = download_to_file("https://documents.parliament.qld.gov.au/Members/mailingLists/MEMMERGEEXCEL.xls").await?;
     parse_qld_parliament(qld_members.path())?;
@@ -435,6 +545,7 @@ pub fn create_mp_list() -> anyhow::Result<()> {
     let dir = PathBuf::from_str(MP_SOURCE)?;
     let mut mps = Vec::new();
     { // deal with Federal (Senate and House of Reps).
+        println!("Processing federal");
         let mut reps_from_csvs = parse_australian_house_reps(File::open(dir.join(Chamber::Australian_House_Of_Representatives.to_string()+".csv"))?)?;
         let senate_emails = parse_australian_senate_pdf(&dir.join(Chamber::Australian_Senate.to_string()+".pdf"))?;
         let reps_emails = parse_australian_house_reps_pdf(&dir.join(Chamber::Australian_House_Of_Representatives.to_string()+".pdf"),&extract_electorates(&reps_from_csvs)?)?;
@@ -449,21 +560,41 @@ pub fn create_mp_list() -> anyhow::Result<()> {
         mps.extend(reps_from_csvs);
     }
     { // Deal with Assembly of the ACT
+        println!("Processing ACT");
         mps.extend(parse_act_la(&dir.join(Chamber::ACT_Legislative_Assembly.to_string()+".html"))?);
     }
     { // Deal with NSW
+        println!("Processing NSW");
         mps.extend(parse_nsw_la(File::open(dir.join(Chamber::NSW_Legislative_Assembly.to_string()+".csv"))?)?);
         mps.extend(parse_nsw_lc(File::open(dir.join(Chamber::NSW_Legislative_Council.to_string()+".csv"))?)?);
     }
     { // Deal with NT
+        println!("Processing NT");
         mps.extend(parse_nt_la_pdf(&dir.join(Chamber::NT_Legislative_Assembly.to_string()+".pdf"))?);
     }
     { // Deal with QLD
+        println!("Processing Qld");
         mps.extend(parse_qld_parliament(&dir.join(Chamber::Qld_Legislative_Assembly.to_string()+".xls"))?);
     }
     { // Deal with SA
+        println!("Processing SA");
         mps.extend(parse_sa(File::open(dir.join(Chamber::SA_Legislative_Council.to_string()+".json"))?,Chamber::SA_Legislative_Council)?);
         mps.extend(parse_sa(File::open(dir.join(Chamber::SA_Legislative_Assembly.to_string()+".json"))?,Chamber::SA_Legislative_Assembly)?);
+    }
+    { // Deal with TAS
+        println!("Processing Tas");
+        mps.extend(parse_tas(&dir.join(Chamber::Tas_House_Of_Assembly.to_string()+".xlsx"),Chamber::Tas_House_Of_Assembly)?);
+        mps.extend(parse_tas(&dir.join(Chamber::Tas_Legislative_Council.to_string()+".xlsx"),Chamber::Tas_Legislative_Council)?);
+    }
+    { // Deal with VIC
+        println!("Processing Vic");
+        mps.extend(parse_vic_la(File::open(dir.join(Chamber::Vic_Legislative_Assembly.to_string()+".csv"))?)?);
+        mps.extend(parse_vic_lc(File::open(dir.join(Chamber::Vic_Legislative_Council.to_string()+".csv"))?)?);
+    }
+    { // Deal with WA
+        println!("Processing WA");
+        mps.extend(parse_wa(&dir.join(Chamber::WA_Legislative_Assembly.to_string()+".html"),Chamber::WA_Legislative_Assembly)?);
+        mps.extend(parse_wa(&dir.join(Chamber::WA_Legislative_Council.to_string()+".html"),Chamber::WA_Legislative_Council)?);
     }
     serde_json::to_writer(File::create(dir.join("MPs.json"))?,&mps)?;
     Ok(())
