@@ -225,6 +225,7 @@ fn parse_australian_senate_pdf(path:&Path) -> anyhow::Result<ParsedAustralianSen
     Ok(work.result)
 }
 
+/// Parse ACT legislative assembly
 fn parse_act_la(path:&Path) -> anyhow::Result<Vec<MP>> {
     let mut mps = Vec::new();
     let html = scraper::Html::parse_document(&std::fs::read_to_string(path)?);
@@ -254,6 +255,8 @@ fn parse_act_la(path:&Path) -> anyhow::Result<Vec<MP>> {
     Ok(mps)
 }
 
+
+/// parse NT legislative assembly.
 fn parse_nt_la_pdf(path:&Path) -> anyhow::Result<Vec<MP>> {
     let mut mps = Vec::new();
     let strings = parse_pdf_to_strings_with_same_font(path)?;
@@ -343,9 +346,33 @@ fn parse_qld_parliament(path: &Path)  -> anyhow::Result<Vec<MP>> {
     Ok(mps)
 }
 
+fn parse_sa(file:File,chamber:Chamber) -> anyhow::Result<Vec<MP>> {
+    let mut mps = Vec::new();
+    let raw : serde_json::Value = serde_json::from_reader(file)?;
+    let raw = raw.get("memberContacts").and_then(|v|v.as_array()).ok_or_else(||anyhow!("Missing array field memberContacts for SA Json file"))?;
+    for entry in raw {
+        let field = |name:&str| entry.get(name).ok_or_else(||anyhow!("Missing field {} for SA Json file",name));
+        let string_field = |name:&str| field(name).and_then(|v|v.as_str().map(|s|s.to_string()).ok_or_else(||anyhow!("Field {} is present but not a string for SA Json file",name)));
+        let email = if chamber==Chamber::SA_Legislative_Council { field("email")?.as_str().unwrap_or("") } else { field("electorateContactDetails")?.as_array().and_then(|a|a.iter().find(|v|v.get("contactType").and_then(|s|s.as_str())==Some("Email"))).and_then(|v|v.get("detail")).and_then(|v|v.as_str()).ok_or_else(||anyhow!("Could not find email for SA Json file"))?};
+        let mp = MP{
+            first_name: string_field("firstName")?,
+            surname: string_field("lastName")?,
+            electorate: Electorate { chamber, region: if chamber==Chamber::SA_Legislative_Council {None} else {Some(string_field("electorateName")?)} },
+            email: email.to_string(),  // NB Heidi Girolamo does not have an email on this list.
+            role: field("positions")?.as_array().ok_or_else(||anyhow!("SA Json file position field not array")).and_then(|v|v.iter().map(|e|e.as_str().map(|s|s.to_string()).ok_or_else(||anyhow!("SA Json file position entry not string"))).collect::<anyhow::Result<Vec<String>>>())?.join("; "),
+            party: string_field("politicalPartyName")?
+        };
+        println!("{}",mp);
+        mps.push(mp);
+    }
+    Ok(mps)
+}
+
 fn extract_electorates(mps : &[MP]) -> anyhow::Result<HashSet<String>> {
     mps.iter().map(|mp|mp.electorate.region.as_ref().map(|s|s.to_string()).ok_or_else(||anyhow!("Missing electorate"))).collect()
 }
+
+
 
 /// Download, check, and if valid replace the downloaded files with MP lists.
 pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
@@ -353,7 +380,15 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     std::fs::create_dir_all(MP_SOURCE)?;
     let dir = PathBuf::from_str(MP_SOURCE)?;
 
-    //return Err(anyhow!("testing"));
+    // SA
+    let ha = download_to_file("https://contact-details-api.parliament.sa.gov.au/api/HAMembersDetails").await?;  // TODO Not URL in md doc
+    parse_sa(ha.reopen()?,Chamber::SA_Legislative_Assembly)?;
+    ha.persist(dir.join(Chamber::SA_Legislative_Assembly.to_string()+".json"))?; // TODO change to house of assembly.
+    let lc = download_to_file("https://contact-details-api.parliament.sa.gov.au/api/LCMembersDetails").await?; // TODO not URL in md doc
+    parse_sa(lc.reopen()?,Chamber::SA_Legislative_Council)?;
+    lc.persist(dir.join(Chamber::SA_Legislative_Council.to_string()+".json"))?;
+
+    // return Err(anyhow!("testing"));
     // QLD
     let qld_members = download_to_file("https://documents.parliament.qld.gov.au/Members/mailingLists/MEMMERGEEXCEL.xls").await?;
     parse_qld_parliament(qld_members.path())?;
@@ -425,6 +460,10 @@ pub fn create_mp_list() -> anyhow::Result<()> {
     }
     { // Deal with QLD
         mps.extend(parse_qld_parliament(&dir.join(Chamber::Qld_Legislative_Assembly.to_string()+".xls"))?);
+    }
+    { // Deal with SA
+        mps.extend(parse_sa(File::open(dir.join(Chamber::SA_Legislative_Council.to_string()+".json"))?,Chamber::SA_Legislative_Council)?);
+        mps.extend(parse_sa(File::open(dir.join(Chamber::SA_Legislative_Assembly.to_string()+".json"))?,Chamber::SA_Legislative_Assembly)?);
     }
     serde_json::to_writer(File::create(dir.join("MPs.json"))?,&mps)?;
     Ok(())
