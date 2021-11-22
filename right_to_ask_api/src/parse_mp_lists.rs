@@ -1,6 +1,18 @@
 //! Parse various files from parliament websites giving lists of MPs.
+//!
+//! The general approach is to have a directory (MP_source) containing the source data files
+//! and a generated MPs.json file. There are a series of functions which each parse the files
+//! in question - these are different for each jurisdiction; files parsed include pdf, json, html, csv, xls, xlsx.
+//! There are two stages to generating this file
+//! * Download the needed files. After downloading each file, it is parsed and, if there are no errors, placed in MP_source. This is update_mp_list_of_files().
+//! * Take all the downloaded files in MP_source, and parse each, accumulating the results and storing in MP_source. This is create_mp_list()
+//!
+//! This means that each file is parsed twice (who cares - it doesn't take long and is infrequent).
+//! The only reason to point this out is that it is somewhat unintuitive. It has the advantage that if
+//! a file changes, it doesn't overwrite the old, working, file.
+//!
+//! From datasources listed on https://github.com/RightToAskOrg/technical-docs/blob/main/ParliamentaryDataSources.md
 
-// From datasources listed on https://github.com/RightToAskOrg/technical-docs/blob/main/ParliamentaryDataSources.md
 
 
 use tempfile::NamedTempFile;
@@ -461,7 +473,7 @@ fn extract_electorates(mps : &[MP]) -> anyhow::Result<HashSet<String>> {
 
 
 
-/// Download, check, and if valid replace the downloaded files with MP lists.
+/// Download, check, and if valid replace the downloaded files with MP lists. First of the two stages for generating MPs.json
 pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     std::fs::create_dir_all(TEMP_DIR)?;
     std::fs::create_dir_all(MP_SOURCE)?;
@@ -492,10 +504,10 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     lc.persist(dir.join(Chamber::Tas_Legislative_Council.to_string()+".xlsx"))?;
 
     // SA
-    let ha = download_to_file("https://contact-details-api.parliament.sa.gov.au/api/HAMembersDetails").await?;  // TODO Not URL in md doc
-    parse_sa(ha.reopen()?,Chamber::SA_Legislative_Assembly)?;
-    ha.persist(dir.join(Chamber::SA_Legislative_Assembly.to_string()+".json"))?; // TODO change to house of assembly.
-    let lc = download_to_file("https://contact-details-api.parliament.sa.gov.au/api/LCMembersDetails").await?; // TODO not URL in md doc
+    let ha = download_to_file("https://contact-details-api.parliament.sa.gov.au/api/HAMembersDetails").await?;
+    parse_sa(ha.reopen()?,Chamber::SA_House_Of_Assembly)?;
+    ha.persist(dir.join(Chamber::SA_House_Of_Assembly.to_string()+".json"))?;
+    let lc = download_to_file("https://contact-details-api.parliament.sa.gov.au/api/LCMembersDetails").await?;
     parse_sa(lc.reopen()?,Chamber::SA_Legislative_Council)?;
     lc.persist(dir.join(Chamber::SA_Legislative_Council.to_string()+".json"))?;
 
@@ -540,7 +552,7 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
 
 }
 
-/// Create "data/MP_source/MPs.json" from the source files downloaded by update_mp_list_of_files()
+/// Create "data/MP_source/MPs.json" from the source files downloaded by update_mp_list_of_files(). Second of the two stages for generating MPs.json
 pub fn create_mp_list() -> anyhow::Result<()> {
     let dir = PathBuf::from_str(MP_SOURCE)?;
     let mut mps = Vec::new();
@@ -579,7 +591,7 @@ pub fn create_mp_list() -> anyhow::Result<()> {
     { // Deal with SA
         println!("Processing SA");
         mps.extend(parse_sa(File::open(dir.join(Chamber::SA_Legislative_Council.to_string()+".json"))?,Chamber::SA_Legislative_Council)?);
-        mps.extend(parse_sa(File::open(dir.join(Chamber::SA_Legislative_Assembly.to_string()+".json"))?,Chamber::SA_Legislative_Assembly)?);
+        mps.extend(parse_sa(File::open(dir.join(Chamber::SA_House_Of_Assembly.to_string()+".json"))?, Chamber::SA_House_Of_Assembly)?);
     }
     { // Deal with TAS
         println!("Processing Tas");

@@ -21,7 +21,7 @@ create table if not exists ELECTORATES
                      'NSW_Legislative_Council',
                      'NT_Legislative_Assembly',
                      'Qld_Legislative_Assembly',
-                     'SA_Legislative_Assembly',
+                     'SA_House_Of_Assembly',
                      'SA_Legislative_Council',
                      'Vic_Legislative_Assembly',
                      'Vic_Legislative_Council',
