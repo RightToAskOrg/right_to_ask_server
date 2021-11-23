@@ -14,4 +14,4 @@ actix-rt = "1"
 actix-files = "0.5"
 lazy_static = "1.4"
 anyhow = "1.0"
-merkle-tree-bulletin-board = { path="../../bulletin-board/merkle-tree-bulletin-board"}
+merkle-tree-bulletin-board = "0.1"

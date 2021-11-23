@@ -2,9 +2,6 @@
 
 ## Compiling
 
-To compile this you currently need the git repository bulletin-board at the same level as this
-directory.
-
 This is a rust program. Install rust, change to the directory containing this file, and compile with 
 ```bash
 cargo build --release

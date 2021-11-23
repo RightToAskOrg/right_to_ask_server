@@ -49,7 +49,7 @@ pub fn initialize_bulletin_board_database() -> anyhow::Result<()> {
     conn.query_drop("drop table if exists BRANCH")?;
     conn.query_drop("drop table if exists LEAF")?;
 
-    let schema = include_str!("../../../bulletin-board/merkle-tree-bulletin-board-backend-mysql/src/bin/Schema.sql"); // TODO put somewhere more sensible.
+    let schema = merkle_tree_bulletin_board_backend_mysql::SCHEMA;
     conn.query_drop(schema)?;
     Ok(())
 }
