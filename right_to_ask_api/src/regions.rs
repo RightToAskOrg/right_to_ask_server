@@ -2,13 +2,15 @@
 
 //! Political regions - states, electorates, etc.
 
-use serde::{Serialize,Deserialize};
+use std::convert::TryFrom;
+use serde::{Serialize, Deserialize};
 use std::fmt;
 use mysql::prelude::{FromValue, ConvIr};
 use mysql::{Value, FromValueError};
 use std::fmt::{Display, Formatter};
+use anyhow::anyhow;
 
-#[derive(Debug,Clone,Copy,Serialize,Deserialize,Eq,PartialEq)]
+#[derive(Debug,Clone,Copy,Serialize,Deserialize,Eq,PartialEq,Hash)]
 pub enum State {
     ACT,NSW,NT,QLD,SA,TAS,VIC,WA
 }
@@ -26,6 +28,22 @@ impl From<State> for Value {
 	}
 }
 
+impl TryFrom<&str> for State {
+	type Error = anyhow::Error;
+	fn try_from(value: &str) -> Result<Self, Self::Error> {
+		match value.as_bytes() {
+			b"ACT" => Ok(State::ACT),
+			b"NSW" => Ok(State::NSW),
+			b"NT" => Ok(State::NT),
+			b"QLD" => Ok(State::QLD),
+			b"SA" => Ok(State::SA),
+			b"TAS" => Ok(State::TAS),
+			b"VIC" => Ok(State::VIC),
+			b"WA" => Ok(State::WA),
+			_ => Err(anyhow!("Invalid state {}",value)),
+		}
+	}
+}
 impl ConvIr<State> for State {
 	fn new(v: Value) -> Result<Self, FromValueError> {
 		match v {
@@ -136,4 +154,15 @@ impl Display for Electorate {
 			write!(f, "{}", self.chamber)
 		}
 	}
+}
+
+
+/// Nested political divisions.
+/// For instance
+///  * federal electorates are in a state;
+///  * Vic districts are in a region
+#[derive(Debug,Clone,Serialize,Deserialize)]
+pub struct RegionContainingOtherRegions {
+	pub super_region : String,
+	pub regions: Vec<String>,
 }
