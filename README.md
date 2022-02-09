@@ -62,10 +62,27 @@ Download files and make `data/MP_source/MPs.json` by running `./target/release/u
 ```bash
 ./target/release/right_to_ask_server
 ```
-`./target/release/initialize_databases`.
+
 This will create a new webserver which has a home page providing some test and diagnostic pages. Its url will
 be printed. Stop with control-C.
 
+## Subsequent runs
+After you have set all this up the first time, you should only need to run
+```
+./target/release/right_to_ask_server
+```
+
+Depending on your system, some people also find they need to restart the mysql server every time. If the above command complains that it can't access the database, you might need
+```
+sudo service mysql start
+```
+first, or the equivalent systemctl command. Or you can make this go away entirely by enabling mysql to start automatically at boot time.
+
+Optionally, you can run
+```
+`./target/release/initialize_databases`.
+```
+at any time. This will reinitialize (i.e. wipe) the database contents.
 ## Copyright
 
 This program is Copyright 2021 Thinking Cybersecurity Pty. Ltd. 
