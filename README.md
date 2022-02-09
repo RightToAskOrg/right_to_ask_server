@@ -78,11 +78,12 @@ sudo service mysql start
 ```
 first, or the equivalent systemctl command. Or you can make this go away entirely by enabling mysql to start automatically at boot time.
 
-Optionally, you can run
+Optionally, you can execute
 ```
 `./target/release/initialize_databases`.
 ```
-at any time. This will reinitialize (i.e. wipe) the database contents.
+between runs. This will reinitialize (i.e. wipe) the database contents.
+
 ## Copyright
 
 This program is Copyright 2021 Thinking Cybersecurity Pty. Ltd. 
