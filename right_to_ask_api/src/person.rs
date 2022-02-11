@@ -11,6 +11,9 @@ use crate::database::{get_rta_database_connection, get_bulletin_board};
 use mysql::prelude::{Queryable, ConvIr, FromValue};
 use merkle_tree_bulletin_board::hash::HashValue;
 
+/// A unique ID identifying a person.
+pub type PersonUID = String;
+
 pub type PublicKey=String;
 /// Signature encodings
 /// To sign a list of fields:
@@ -28,7 +31,7 @@ pub type Signature = String;
 /// Information for the NewRegistration function
 #[derive(Debug,Clone,Serialize,Deserialize,Eq,PartialEq)]
 pub struct NewRegistration {
-    uid : String,
+    uid : PersonUID,
     #[serde(default,skip_serializing_if = "Option::is_none")]
     display_name : Option<String>,
     public_key : PublicKey,
@@ -51,7 +54,7 @@ pub enum RegistrationError {
 
 #[derive(Debug,Clone,Serialize,Deserialize,Eq,PartialEq)]
 pub struct UserInfo {
-    uid : String,
+    uid : PersonUID,
     #[serde(default,skip_serializing_if = "Option::is_none")]
     display_name : Option<String>,
     public_key : PublicKey,
@@ -189,7 +192,7 @@ pub async fn get_user_by_id(uid:&str) -> mysql::Result<Option<UserInfo>> {
 /// Information to request that an email be sent asking for verification.
 #[derive(Debug,Clone,Serialize,Deserialize,Eq,PartialEq)]
 pub struct RequestEmailValidation {
-    uid : String, // uid making the query
+    uid : PersonUID, // uid making the query
     email : String, // email address to be validated
     why : EmailValidationReason,
     signature : Signature, // signature of UTF-8 encoding of uid|0|email|0|why(as string)
@@ -200,8 +203,8 @@ pub enum EmailValidationReason {
     AsMP,
     AsOrg,
     AccountRecovery,
-    RevokeMP(String), // revoke a given UID.
-    RevokeOrg(String), // revoke a given UID
+    RevokeMP(PersonUID), // revoke a given UID.
+    RevokeOrg(PersonUID), // revoke a given UID
 }
 
 
@@ -209,7 +212,7 @@ pub enum EmailValidationReason {
 /// Information to request that an email be sent asking for verification.
 #[derive(Debug,Clone,Serialize,Deserialize,Eq,PartialEq)]
 pub struct EmailProof {
-    uid : String, // uid making the query
+    uid : PersonUID, // uid making the query
     pin : String, // email address to be validated
     signature : Signature, // signature of UTF-8 encoding of uid|pin
 }
@@ -218,7 +221,7 @@ pub struct EmailProof {
 /// Information for the EditRegistration function
 #[derive(Debug,Clone,Serialize,Deserialize,Eq,PartialEq)]
 pub struct EditRegistration {
-    uid : String,
+    uid : PersonUID,
     #[serde(default,skip_serializing_if = "Option::is_none")]
     display_name : Option<String>,
     #[serde(default,skip_serializing_if = "Option::is_none")]

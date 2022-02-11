@@ -6,6 +6,7 @@ pub mod config;
 pub mod mp;
 mod parse_mp_lists;
 mod parse_pdf_util;
+pub mod question;
 
 #[cfg(test)]
 mod tests {

@@ -1,12 +1,14 @@
 //! Stuff to do with signing
 
 
+use std::convert::TryFrom;
 use once_cell::sync::Lazy;
 use ed25519_dalek::{Keypair, PUBLIC_KEY_LENGTH, SecretKey, PublicKey, ExpandedSecretKey};
 use serde::{Serialize,Deserialize};
 use crate::config::CONFIG;
 use pkcs8::{PrivateKeyInfo, SubjectPublicKeyInfo};
 use pkcs8::der::Decodable;
+use serde::de::DeserializeOwned;
 
 static SERVER_KEY : Lazy<Keypair>  = Lazy::new(||{
     let private = base64::decode(&CONFIG.signing.private).expect("Could not decode config private key base64 encoding");
@@ -51,6 +53,53 @@ pub fn get_server_public_key_raw_base64() -> String {
 pub fn sign_message(message : &[u8]) -> String {
     let signature = SERVER_PRIVATE_EXPANDED_KEY.sign(message,&SERVER_KEY.public);
     base64::encode(signature.to_bytes())
+}
+
+#[derive(Serialize,Deserialize,Debug,Clone)]
+#[serde(try_from = "ClientSignedUnparsed")]
+#[serde(bound(deserialize = "T: DeserializeOwned"))]
+/// This is a signed message from the client to the server.
+///
+/// The message is a possibly complex structure of type T. It has been encoded as JSON in the
+/// [ClientSignedUnparsed::message] field, which has then been signed. Because JSON encoding
+/// is not necessarily unique, it is needed to specifically keep the encoding around. This structure
+/// transparently serializes/deserializes as if it were a [ClientSignedUnparsed] message,
+/// but also decoding to a parsed value.
+pub struct ClientSigned<T> {
+    #[serde(flatten)]
+    pub signed_message : ClientSignedUnparsed,
+    //#[serde(skip_serializing,bound="")]
+    pub parsed : T,
+}
+
+#[derive(Serialize,Deserialize,Debug,Clone)]
+/// This is a message from a client to the server, signed by the client.
+/// The message is generally some JSON encoded data.
+///
+/// [ClientSigned] is a more type safe version, handling parsing automatically.
+pub struct ClientSignedUnparsed {
+    /// The message is a JSON encoding of the actual command being sent from the client. The actual command is of type T.
+    pub message : String,
+    /// the signature of the message
+    pub signature : String,
+    /// unique ID of the user
+    pub user : String,
+}
+
+impl <T> TryFrom<ClientSignedUnparsed> for ClientSigned<T> where T: DeserializeOwned {
+    type Error = anyhow::Error;
+
+    fn try_from(signed_message: ClientSignedUnparsed) -> Result<Self, Self::Error> {
+        let parsed : T = serde_json::from_str(&signed_message.message)?;
+        Ok(ClientSigned{ signed_message , parsed })
+    }
+}
+
+impl <T:DeserializeOwned> ClientSigned<T> {
+
+    pub fn check_signature(&self) {
+
+    }
 }
 
 
