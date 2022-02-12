@@ -89,10 +89,11 @@ impl QuestionDefiningFields {
     }
 }
 
+#[derive(Serialize,Deserialize,Copy,Clone)]
 pub enum Permissions {
     WriterOnly,
     Others,
-    NoChange
+    NoChange,
 }
 
 #[derive(Serialize,Deserialize,Debug,Clone)]
@@ -339,7 +340,19 @@ impl EditQuestion {
                         FLAG A QUESTION
  *************************************************************************/
 
-
+#[derive(Serialize,Deserialize,Copy,Clone)]
+pub enum FlagReason {
+    NotAQuestion,
+    ThreateningViolence,
+    IncludesPrivateInformation,
+    IncitesHatred,
+    EncouragesHarm,
+    TargetedHarassment,
+    DefamatoryInsinuation, // You're allowed to ask a real question, including some that may be perceived as offensive, but you're not allowed to ask
+                           // questions that presuppose misbehaviour unless it is a matter of public record.
+                           // e.g. it's OK to ask, "Is it true, as alleged by X, that you accepted a bribe..."
+                           // but you're not allowed to ask "When are you going to stop taking bribes"?
+}
 
 
 
@@ -350,6 +363,5 @@ impl EditQuestion {
 #[derive(Serialize,Deserialize)]
 pub struct FlagQuestion {
     uid : QuestionID,
-    /// complaint details. Should this be a string, or more structured?
-    complaint : String,
+    reason : FlagReason,
 }
