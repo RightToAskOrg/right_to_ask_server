@@ -89,6 +89,12 @@ impl QuestionDefiningFields {
     }
 }
 
+pub enum Permissions {
+    WriterOnly,
+    Others,
+    NoChange
+}
+
 #[derive(Serialize,Deserialize,Debug,Clone)]
 /// This contains the fields for the question that can be changed.
 ///
@@ -105,32 +111,42 @@ impl QuestionDefiningFields {
 pub struct QuestionNonDefiningFields {
     /// Validity: character length
     /// Permission: must be from the question-writer
-    /// Merge rule: Reject updates unless currently blank.
+    /// Merge rule: Allow append from question-writer.
     pub background : Option<String>,
-    /// Validity: must be MPs.
-    /// Permission: TODO n/a in the technical docs. Does this mean anyone can add this?
+    /// Validity: must be an MP or a user. (If a user is associated with an MP then tag for the MP.)
+    /// Permission: defined by who_should_ask_the_question_permissions
     /// Merge rule: TODO consider whether the version check changes this. Eliminate duplicates (including with values already present). If the total number of values doesn't exceed the limit, accept. If the limit has already been exceeded, reject. If it hasn't, but would if this update was accepted, send a merge request back to the client (pick at most m out of the n you tried to submit...).  Note that this might cause cascading merges that need to be manually resolved, but that's less trouble than allowing locks.
     pub mp_who_should_ask_the_question : Vec<PersonUID>,
-    /// TODO is this a person?
+    /// Permission: must be from the question-writer
+    /// Merge rule: overwrite, unless it's 'NoChange'
+    pub who_should_ask_the_question_permissions : Permissions,
+    /// TODO is this a person? - Ans: *** It's either an MP or a user. Think about this because multiple users may be attached to one MP, so we want in
+    /// that case to ref the MP not the (perhaps multiple) user(s).
     /// Validity : see above TODO
-    /// Permission: TODO
+    /// Permission: Defined by who_should_answer_the_question_permissions
     /// Merge rule : same as mp_who_should_ask_the_question
     pub entity_who_should_answer_the_question : Vec<PersonUID>,
+    /// Permission: must be from the question-writer
+    /// Merge rule: overwrite, unless it's 'NoChange'
+    pub who_should_answer_the_question_permissions : Permissions,
     /// Validity : character length; answerer must match the sig.
     /// Permission Must be from MP. TODO Can an entity_who_should_answer_the_question ... answer the question?
+    /// VT: Counterintuitively, No. I am assuming that public authorities won't join the system, only MPs. And then it seems only fair to let other
+    /// MPs answer, even if they are not the person tagged in the system.
     /// Merge rule : just add. No problems with multiple answers from different people. Or even multiple answers from the same person, e.g. MP day 1: "I will ask that for you." Day 3: "They said 42."
     pub answers : Vec<QuestionAnswer>,
     /// Permission: must be from the question-writer
     /// Merge rule : may be changed from false to true.
     pub answer_accepted : bool,
     /// Validity : domain must be aph.gov.au, parliament.vic.gov.au, etc. (preloaded permit-list - note that url sanitation is nontrivial). TODO work out nontrivial stuff
-    /// Permission: n/a TODO can anyone add?
+    /// Permission: n/a TODO can anyone add? VT: Yes. We'll need to check urls.
     /// Merge rule : same as mp_who_should_ask_the_question
     pub hansard_link : Vec<HansardLink>,
     /// Validity: must be a pre-existing Question-Id
-    /// Permissions: TODO: think about whether only the question-writer can write a followup.
-    /// Merge rule: TODO check. (should this be a list? probably simpler if not) Reject updates unless currently blank.
+    /// Permissions: TODO: think about whether only the question-writer can write a followup. VT: I think yes.
+    /// Merge rule:  Reject updates unless currently blank. TODO check. (should this be a list? probably simpler if not). VT: Agree. Let's just have one at a time. People can make a linear chain. (Twitter actually allows a tree, and it's a complete pain. Lines are better.)
     pub is_followup_to : Option<QuestionID>,
+    /// TODO: VT I think we want expiry dates, probably with a short default (2 weeks?) Agree we don't need keywords or categories.
     // Note that I have not included
     /*
     Note that I have not included, from the tech docs,
