@@ -27,3 +27,11 @@ impl Display for MP {
         write!(f, "{}, {} party {} electorate {} {} {}", self.surname, self.first_name,self.party,self.electorate,self.email,self.role)
     }
 }
+
+/// Information identifying an MP.
+#[derive(Serialize,Deserialize,Clone,Debug)]
+pub struct MPId {
+    pub first_name : String,
+    pub surname : String,
+    pub electorate : Electorate,
+}

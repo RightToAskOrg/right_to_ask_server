@@ -1,0 +1,33 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="common.css">
+    <script src="util.js"></script>
+    <script src="common.js"></script>
+    <script src="AddQuestion.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tweetnacl/1.0.3/nacl-fast.min.js"></script>
+    <title>Add Question - Testing only</title>
+</head>
+<body>
+
+<p>Note: This is not for production use. It is for testing purposes only.</p>
+
+<label for="UID">User posting question: </label><input type="text" id="UID"/><br/>
+<label for="PrivateKey">User private key: </label><input type="text" id="PrivateKey"/><br/>
+<label for="QuestionText">Question Text: </label><input type="text" id="QuestionText"/><br/>
+
+<button id="Add">Add</button>
+
+
+<div id="status">
+    <h5>Status</h5>
+</div>
+
+<h5>Question List</h5>
+<div id="QuestionList">
+</div>
+
+</body>
+</html>

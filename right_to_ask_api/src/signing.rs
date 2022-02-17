@@ -68,7 +68,7 @@ pub fn sign_message(message : &[u8]) -> String {
 pub struct ClientSigned<T> {
     #[serde(flatten)]
     pub signed_message : ClientSignedUnparsed,
-    //#[serde(skip_serializing,bound="")]
+    #[serde(skip_serializing,bound="")]
     pub parsed : T,
 }
 

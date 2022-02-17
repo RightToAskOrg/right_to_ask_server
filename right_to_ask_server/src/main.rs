@@ -6,14 +6,24 @@ use right_to_ask_api::person::{NewRegistration, get_list_of_all_users, get_count
 use merkle_tree_bulletin_board::hash::HashValue;
 use right_to_ask_api::database::get_bulletin_board;
 use merkle_tree_bulletin_board::hash_history::{FullProof, HashInfo};
-use right_to_ask_api::signing::{get_server_public_key_base64encoded, ServerSigned, get_server_public_key_raw_hex, get_server_public_key_raw_base64};
+use right_to_ask_api::signing::{get_server_public_key_base64encoded, ServerSigned, get_server_public_key_raw_hex, get_server_public_key_raw_base64, ClientSigned};
 use actix_web::http::header::{ContentDisposition, DispositionType, DispositionParam};
 use actix_files::NamedFile;
+use right_to_ask_api::question::{NewQuestionCommand, QuestionID, QuestionInfo};
 
 #[post("/new_registration")]
 async fn new_registration(command : Json<NewRegistration>) -> Json<Result<ServerSigned,String>> {
     Json(ServerSigned::sign_string(command.register().await))
 }
+
+#[post("/new_question")]
+async fn new_question(command : Json<ClientSigned<NewQuestionCommand>>) -> Json<Result<ServerSigned,String>> {
+    let res = NewQuestionCommand::add_question(&command).await;
+    let signed = ServerSigned::sign(res);
+    Json(signed)
+}
+
+
 
 /// Get server public key, in base64 encoded SPKI format (PEM body).
 #[get("/get_server_public_key_spki")]
@@ -46,6 +56,21 @@ struct QueryUser {
 #[get("/get_user")]
 async fn get_user(query:web::Query<QueryUser>) -> Json<Result<Option<UserInfo>,String>> {
     Json(get_user_by_id(&query.uid).await.map_err(|e|e.to_string()))
+}
+
+#[derive(serde::Deserialize)]
+struct QueryQuestion {
+    question_id : QuestionID,
+}
+#[get("/get_question")]
+async fn get_question(query:web::Query<QueryQuestion>) -> Json<Result<Option<QuestionInfo>,String>> {
+    Json(QuestionInfo::lookup(query.question_id).await.map_err(|e|e.to_string()))
+}
+
+/// For testing only!
+#[get("/get_question_list")]
+async fn get_question_list() -> Json<Result<Vec<QuestionID>,String>> {
+    Json(QuestionInfo::get_list_of_all_questions().await.map_err(|e|e.to_string()))
 }
 
 
@@ -140,8 +165,11 @@ async fn main() -> anyhow::Result<()> {
             .service(get_server_public_key_spki)
             .service(get_server_public_key_raw)
             .service(new_registration)
+            .service(new_question)
             .service(get_user_list)
             .service(get_user)
+            .service(get_question_list)
+            .service(get_question)
             .service(censor_leaf)
             .service(get_parentless_unpublished_hash_values)
             .service(get_most_recent_published_root)

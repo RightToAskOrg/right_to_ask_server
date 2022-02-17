@@ -8,8 +8,12 @@ use futures::lock::{Mutex, MutexGuard};
 use merkle_tree_bulletin_board::backend_journal::{BackendJournal, StartupVerification};
 use merkle_tree_bulletin_board_backend_mysql::BackendMysql;
 use merkle_tree_bulletin_board::BulletinBoard;
+use merkle_tree_bulletin_board::hash::HashValue;
 use mysql::prelude::Queryable;
 use crate::config::CONFIG;
+use crate::person::NewRegistration;
+use crate::question::NewQuestionCommandPostedToBulletinBoard;
+use serde::{Serialize,Deserialize};
 
 fn get_rta_database_pool_raw() -> Pool {
     let opts = Opts::from_url(&CONFIG.database.rta).expect("Could not parse database_url url");
@@ -40,6 +44,20 @@ pub async fn get_bulletin_board() -> MutexGuard<'static,BulletinBoard<BackendJou
     BACKEND.lock().await
 }
 
+/// Something that may be logged in the bulletin board.
+#[derive(Serialize,Deserialize,Debug,Clone)]
+pub enum LogInBulletinBoard {
+    NewUser(NewRegistration),
+    NewQuestion(NewQuestionCommandPostedToBulletinBoard),
+}
+
+impl LogInBulletinBoard {
+    pub async fn log_in_bulletin_board(&self) -> anyhow::Result<HashValue> {
+        let mut board = get_bulletin_board().await;
+        let data = serde_json::ser::to_string(self).unwrap();
+        board.submit_leaf(&data)
+    }
+}
 
 /// Delete all data and recreate the schema.
 pub fn initialize_bulletin_board_database() -> anyhow::Result<()> {
