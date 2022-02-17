@@ -18,9 +18,13 @@ async fn new_registration(command : Json<NewRegistration>) -> Json<Result<Server
 
 #[post("/new_question")]
 async fn new_question(command : Json<ClientSigned<NewQuestionCommand>>) -> Json<Result<ServerSigned,String>> {
-    let res = NewQuestionCommand::add_question(&command).await;
-    let signed = ServerSigned::sign(res);
-    Json(signed)
+    if let Err(signing_error) = command.signed_message.check_signature().await {
+        Json(Err(signing_error.to_string()))
+    } else {
+        let res = NewQuestionCommand::add_question(&command).await;
+        let signed = ServerSigned::sign(res);
+        Json(signed)
+    }
 }
 
 

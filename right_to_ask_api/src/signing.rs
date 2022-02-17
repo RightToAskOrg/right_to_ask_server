@@ -2,13 +2,16 @@
 
 
 use std::convert::TryFrom;
+use std::fmt::{Display, Formatter};
 use once_cell::sync::Lazy;
-use ed25519_dalek::{Keypair, PUBLIC_KEY_LENGTH, SecretKey, PublicKey, ExpandedSecretKey};
+use ed25519_dalek::{Keypair, PUBLIC_KEY_LENGTH, SecretKey, PublicKey, ExpandedSecretKey, Verifier};
+use ed25519_dalek::ed25519::signature::Signature;
 use serde::{Serialize,Deserialize};
 use crate::config::CONFIG;
 use pkcs8::{PrivateKeyInfo, SubjectPublicKeyInfo};
 use pkcs8::der::Decodable;
 use serde::de::DeserializeOwned;
+use crate::person::get_user_public_key_by_id;
 
 static SERVER_KEY : Lazy<Keypair>  = Lazy::new(||{
     let private = base64::decode(&CONFIG.signing.private).expect("Could not decode config private key base64 encoding");
@@ -95,13 +98,32 @@ impl <T> TryFrom<ClientSignedUnparsed> for ClientSigned<T> where T: DeserializeO
     }
 }
 
-impl <T:DeserializeOwned> ClientSigned<T> {
-
-    pub fn check_signature(&self) {
-
+#[derive(Debug)]
+pub enum SignatureCheckError {
+    InternalError,
+    NoSuchUser,
+    InvalidPublicKeyFormat,
+    InvalidSignatureFormat,
+    BadSignature,
+}
+impl Display for SignatureCheckError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f,"{:?}",self)
     }
 }
 
+impl ClientSignedUnparsed {
+
+    pub async fn check_signature(&self) -> Result<(), SignatureCheckError> {
+        if let Some(public_key) = get_user_public_key_by_id(&self.user).await.map_err(|_| SignatureCheckError::InternalError)? {
+            let public_key = base64::decode(&public_key).map_err(|_| SignatureCheckError::InvalidPublicKeyFormat)?;
+            let public_key = PublicKey::from_bytes(&public_key).map_err(|_| SignatureCheckError::InvalidPublicKeyFormat)?;
+            let signature = base64::decode(&self.signature).map_err(|_| SignatureCheckError::InvalidSignatureFormat)?;
+            let signature = Signature::from_bytes(&signature).map_err(|_| SignatureCheckError::InvalidSignatureFormat)?;
+            public_key.verify(self.message.as_bytes(),&signature).map_err(|_| SignatureCheckError::BadSignature)
+        } else { Err(SignatureCheckError::NoSuchUser) }
+    }
+}
 
 #[derive(Serialize,Deserialize)] // deserialization probably won't be needed.
 pub struct ServerSigned {

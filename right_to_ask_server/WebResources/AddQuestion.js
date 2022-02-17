@@ -23,6 +23,13 @@ function decodeBase64(s) {
     return b;
 }
 
+// function taken from tweetnacl-util, by Dmitry Chestnykh and Devi Mandiri, public domain.
+function encodeBase64(arr) {
+    var i, s = [], len = arr.length;
+    for (i = 0; i < len; i++) s.push(String.fromCharCode(arr[i]));
+    return btoa(s.join(''));
+}
+
 function check_signature(signed) {
     const message = signed.message;
     const signature = signed.signature;
@@ -56,8 +63,12 @@ function addQuestion() {
     }
     let message = JSON.stringify(command);
     let user = document.getElementById("UID").value;
-    let private_key = document.getElementById("PrivateKey").value;
-    let signature = ""; // TODO.
+    let privateKey = document.getElementById("PrivateKey").value;
+    const privateKeyUint8Array = decodeBase64(privateKey);
+    const messageUint8Array = (new TextEncoder()).encode(message);
+    const signatureUint8Array = nacl.sign.detached(messageUint8Array,privateKeyUint8Array);
+    console.log(signatureUint8Array);
+    let signature = encodeBase64(signatureUint8Array);
     let signed_message = { message:message, user:user, signature:signature };
     getWebJSON("new_question",success,failure,JSON.stringify(signed_message),"application/json")
 }

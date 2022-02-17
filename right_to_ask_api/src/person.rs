@@ -183,6 +183,12 @@ pub async fn get_user_by_id(uid:&str) -> mysql::Result<Option<UserInfo>> {
     } else {Ok(None)}
 }
 
+pub async fn get_user_public_key_by_id(uid:&str) -> mysql::Result<Option<String>> {
+    let mut conn = get_rta_database_connection().await?;
+    conn.exec_first("SELECT PublicKey from USERS where UID=?",(uid,))
+}
+
+
 
 /// Information to request that an email be sent asking for verification.
 #[derive(Debug,Clone,Serialize,Deserialize,Eq,PartialEq)]
