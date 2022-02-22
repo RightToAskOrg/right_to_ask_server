@@ -64,7 +64,7 @@ Download files and make `data/MP_source/MPs.json` by running `./target/release/u
 ```
 
 This will create a new webserver which has a home page providing some test and diagnostic pages. Its url will
-be printed. Stop with control-C.
+be printed. Stop with control-C.  You can check that it is working by visiting the url (probably localhost:8099) in your web browser.
 
 ## Subsequent runs
 After you have set all this up the first time, you should only need to run
