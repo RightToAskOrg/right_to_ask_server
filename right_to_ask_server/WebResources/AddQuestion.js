@@ -5,15 +5,18 @@ function showQuestion(div,user) {
     a.innerText=user;
     a.href = "get_question?question_id="+encodeURIComponent(user);
 }
+
 function updateQuestionList() {
-    function success(data) {
-        console.log(data);
-        const div = document.getElementById("QuestionList");
-        removeAllChildElements(div);
-        if (data.Ok) for (const line of data.Ok) showQuestion(add(div,"div"),line);
-        else if (data.Err) div.innerText="Error : "+data.Err;
+    const div = document.getElementById("QuestionList");
+    if (div) { // only use for a page with a list of questions.
+        function success(data) {
+            // console.log(data);
+            removeAllChildElements(div);
+            if (data.Ok) for (const line of data.Ok) showQuestion(add(div,"div"),line);
+            else if (data.Err) div.innerText="Error : "+data.Err;
+        }
+        getWebJSON("get_question_list",success,failure);
     }
-    getWebJSON("get_question_list",success,failure);
 }
 
 // function taken from tweetnacl-util, by Dmitry Chestnykh and Devi Mandiri, public domain.
@@ -46,6 +49,15 @@ function check_signature(signed) {
     getWebJSON("get_server_public_key_raw",success,failure)
 }
 
+function getQuestionNonDefiningFields() {
+    let res = {};
+    let text = document.getElementById("BackgroundText").value;
+    if (text.length>0) res.background = text;
+    text = document.getElementById("FollowUpTo").value;
+    if (text.length>0) res.is_followup_to = text;
+    return res;
+}
+
 function addQuestion() {
     function success(result) {
         console.log(result);
@@ -54,13 +66,12 @@ function addQuestion() {
             const decoded = JSON.parse(result.Ok.message);
             status("Added question successfully. Question id "+decoded.question_id+" Bulletin Board hash "+decoded.version+" signature "+result.Ok.signature);
         } else {
-            status("Tried to add user. Got Error message "+result.Err);
+            status("Tried to add question. Got Error message "+result.Err);
         }
         updateQuestionList();
     }
-    let command = {
-        question_text : document.getElementById("QuestionText").value
-    }
+    let command = getQuestionNonDefiningFields();
+    command.question_text = document.getElementById("QuestionText").value;
     let message = JSON.stringify(command);
     let user = document.getElementById("UID").value;
     let privateKey = document.getElementById("PrivateKey").value;

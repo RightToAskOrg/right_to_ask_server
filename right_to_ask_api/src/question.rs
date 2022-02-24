@@ -42,6 +42,9 @@ pub enum QuestionError {
     BackgroundTooLong,
     SameQuestionSubmittedRecently,
     OnlyAuthorCanChangeBackground,
+    CanOnlyExtendBackground,
+    FollowUpIsNotAValidQuestion,
+    FollowUpIsAlreadySet,
     /// The provided question_id does not exist.
     QuestionDoesNotExist,
     /// The provided last_update hash is not the current last update
@@ -158,7 +161,7 @@ pub struct QuestionNonDefiningFields {
     /// Merge rule: overwrite, unless it's 'NoChange'
     #[serde(skip_serializing_if = "Permissions::is_no_change",default)]
     pub who_should_ask_the_question_permissions : Permissions,
-    /// Validity : It's either an MP or a user. TODO Think about this because multiple users may be attached to one MP, so we want in that case to ref the MP not the (perhaps multiple) user(s).
+    /// Validity : It's either an MP or a user.
     /// Permission: Defined by who_should_answer_the_question_permissions
     /// Merge rule : same as mp_who_should_ask_the_question
     #[serde(skip_serializing_if = "Vec::is_empty",default)]
@@ -189,23 +192,6 @@ pub struct QuestionNonDefiningFields {
     /// Merge rule:  Reject updates unless currently blank.  VT: Agree. Let's just have one at a time. People can make a linear chain. (Twitter actually allows a tree, and it's a complete pain. Lines are better.)
     #[serde(skip_serializing_if = "Option::is_none",default)]
     pub is_followup_to : Option<QuestionID>,
-    // TODO: VT I think we want expiry dates, probably with a short default (2 weeks?) Agree we don't need keywords or categories.
-    // Note that I have not included
-    /*
-    Note that I have not included, from the tech docs,
-     * Keywords: List(String)
-        * Validity: short list of short words
-        * Permission: n/a
-        * Merge rule : mp_who_should_ask_the_question
-     * Category: List(Topics)
-        * Validity: short list of pre-loaded topics
-        * Permission: n/a
-        * Merge rule : mp_who_should_ask_the_question
-     * Expiry_Date: date
-        * Validity: must be later than Upload_Timestamp (and within ?? a year)
-        * Permission: must from the question-writer
-
-     */
 }
 
 #[derive(Serialize,Deserialize,Debug,Clone)]
@@ -225,27 +211,45 @@ pub struct HansardLink {
 
 
 impl QuestionNonDefiningFields {
-    pub fn check_legal(&self,is_creator:bool,is_mp:bool) -> Result<(),QuestionError> {
+    pub async fn check_legal(&self,is_creator:bool,is_mp:bool,existing:Option<&QuestionInfo>) -> Result<(),QuestionError> {
         if let Some(background) = &self.background {
             if background.len()>MAX_BACKGROUND_LENGTH { return Err(QuestionError::BackgroundTooLong); }
             if !is_creator { return Err(QuestionError::OnlyAuthorCanChangeBackground); }
+            if !existing.and_then(|info|info.non_defining.background.as_ref()).map(|e|background.starts_with(e)).unwrap_or(true) { return Err(QuestionError::CanOnlyExtendBackground); }
         }
         if self.answers.iter().any(|a|a.answer.len()>MAX_ANSWER_LENGTH)  { return Err(QuestionError::AnswerTooLong); }
         if self.answers.iter().any(|a|a.answer.len()>MAX_ANSWER_LENGTH)  { return Err(QuestionError::AnswerTooLong); }
         if (!self.answers.is_empty()) && !is_mp  { return Err(QuestionError::OnlyMPCanAnswerQuestion); }
+        if let Some(follow_up_to) = self.is_followup_to {
+            // check it is a valid question
+            let mut conn = get_rta_database_connection().await.map_err(internal_error)?;
+            if conn.exec_first::<mysql::Value,_,_>("select QuestionID from QUESTIONS where QuestionID=?",(follow_up_to.0,)).map_err(internal_error)?.is_none() { return Err(QuestionError::FollowUpIsNotAValidQuestion); }
+            // check that it is not already set
+            if let Some(existing) = existing {
+                if existing.non_defining.is_followup_to.is_some() { return Err(QuestionError::FollowUpIsAlreadySet); }
+            }
+        }
         // TODO finish legal checks.
         Ok(())
     }
 
     /// Add a simple question to the database, without any extra information yet.
     async fn modify_database(&self,question_id:QuestionID,new_version:LastQuestionUpdate,expecting_version:Option<LastQuestionUpdate>,timestamp:Timestamp) -> Result<(),QuestionError> {
+        println!("modify_database with question non-defining fields {:?}",self);
         let mut conn = get_rta_database_connection().await.map_err(internal_error)?;
         let mut transaction = conn.start_transaction(TxOpts::default()).map_err(internal_error)?;
         if let Some(current_version) = transaction.exec_first::<mysql::Value,_,_>("select Version from QUESTIONS where QuestionID=?",(question_id.0,)).map_err(internal_error)? {
             let expected : mysql::Value = expecting_version.map(|v|v.0).into();
             if expected!=current_version { return Err(QuestionError::LastUpdateIsNotCurrent); }
         } else { return Err(QuestionError::QuestionDoesNotExist); }
-        transaction.exec_drop("update QUESTIONS set LastModifiedTimestamp=?,Version=? where QuestionID=?", (timestamp,new_version.0,question_id.0)).map_err(internal_error).map_err(internal_error)?;
+        transaction.exec_drop("update QUESTIONS set LastModifiedTimestamp=?,Version=? where QuestionID=?", (timestamp,new_version.0,question_id.0)).map_err(internal_error)?;
+        if let Some(background) = &self.background {
+            println!("Setting background to {}",background);
+            transaction.exec_drop("update QUESTIONS set Background=? where QuestionID=?", (background,question_id.0)).map_err(internal_error)?;
+        }
+        if let Some(follow_up_to) = self.is_followup_to {
+            transaction.exec_drop("update QUESTIONS set FollowUpTo=? where QuestionID=?", (follow_up_to.0,question_id.0)).map_err(internal_error)?;
+        }
         // TODO insert stuff.
         transaction.commit().map_err(internal_error)?;
         Ok(())
@@ -333,9 +337,9 @@ impl NewQuestionCommand {
     pub async fn add_question(question:&ClientSigned<NewQuestionCommand>) -> Result<NewQuestionCommandResponse,QuestionError> {
         if question.parsed.question_text.len()>MAX_QUESTION_LENGTH { return Err(QuestionError::QuestionTooLong); }
         if question.parsed.question_text.len()<MIN_QUESTION_LENGTH { return Err(QuestionError::QuestionTooShort); }
-        question.parsed.non_defining_fields.check_legal(true,false)?;
+        question.parsed.non_defining_fields.check_legal(true,false,None).await?;
         let timestamp = timestamp_now().map_err(internal_error)?;
-        let question_id = Self::add_question_stub(&question.signed_message.user,&question.parsed.question_text,timestamp).await.map_err(internal_error)?;
+        let question_id = Self::add_question_stub(&question.signed_message.user,&question.parsed.question_text,timestamp).await?;
         let for_bb = NewQuestionCommandPostedToBulletinBoard {
             command: question.clone(),
             timestamp,
@@ -403,13 +407,13 @@ impl QuestionInfo {
                         defining: QuestionDefiningFields { author, question_text, timestamp },
                         non_defining: QuestionNonDefiningFields {
                             background, // : convert_null_allowed_value_to_option(background),
-                            mp_who_should_ask_the_question: vec![],
+                            mp_who_should_ask_the_question: vec![], // TODO
                             who_should_ask_the_question_permissions: if who_should_ask_the_question_permissions { Permissions::Others } else { Permissions::WriterOnly } ,
-                            entity_who_should_answer_the_question: vec![],
+                            entity_who_should_answer_the_question: vec![], // TODO
                             who_should_answer_the_question_permissions: if who_should_answer_the_question_permissions { Permissions::Others } else { Permissions::WriterOnly } ,
-                            answers: vec![],
+                            answers: vec![], // TODO
                             answer_accepted,
-                            hansard_link: vec![],
+                            hansard_link: vec![], // TODO
                             is_followup_to : opt_hash_from_value(is_followup_to),
                         },
                         question_id,
