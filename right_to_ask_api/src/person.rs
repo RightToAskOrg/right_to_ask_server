@@ -6,10 +6,19 @@ use serde::{Serialize,Deserialize};
 
 use crate::regions::{State, Electorate};
 use std::fmt;
+use std::fmt::Debug;
+use std::sync::Mutex;
+use std::time::Duration;
 use mysql::{TxOpts, Value, FromValueError};
 use crate::database::{get_rta_database_connection, LogInBulletinBoard};
 use mysql::prelude::{Queryable, ConvIr, FromValue};
 use merkle_tree_bulletin_board::hash::HashValue;
+use once_cell::sync::Lazy;
+use rand::Rng;
+use sha2::{Digest, Sha256};
+use crate::mp::MPSpec;
+use crate::signing::ClientSigned;
+use crate::time_limited_hashmap::TimeLimitedHashMap;
 
 /// A unique ID identifying a person.
 pub type UserUID = String;
@@ -79,6 +88,17 @@ pub enum BadgeType {
 pub struct Badge {
     badge : BadgeType,
     what : String,
+}
+
+impl Badge {
+    async fn store_in_database(&self,uid:&str) -> mysql::Result<()> {
+        let what = if self.what.len()<50 { &self.what } else { &self.what[0..50] };
+        let mut conn = get_rta_database_connection().await?;
+        let mut tx = conn.start_transaction(TxOpts::default())?;
+        tx.exec_drop("insert into BADGES (UID,badge,what) values (?,?,?)",(uid,&self.badge,what))?;
+        tx.commit()?;
+        Ok(())
+    }
 }
 
 // Provide Display & to_string() for BadgeType enum
@@ -188,20 +208,65 @@ pub async fn get_user_public_key_by_id(uid:&str) -> mysql::Result<Option<String>
     conn.exec_first("SELECT PublicKey from USERS where UID=?",(uid,))
 }
 
+#[derive(Debug,Clone,Copy,Serialize,Deserialize,Eq,PartialEq)]
+pub enum EmailValidationError {
+    NoCodeOrExpired,
+    WrongUser,
+    WrongCode,
+    InternalError,
+    CouldNotWriteToBulletinBoard,
+    MPEmailNotKnown,
+}
 
+impl fmt::Display for EmailValidationError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+fn internal_error_email<T:Debug>(error:T) -> EmailValidationError {
+    eprintln!("Internal error {:?}",error);
+    EmailValidationError::InternalError
+}
+fn bulletin_board_error_email(error:anyhow::Error) -> EmailValidationError {
+    eprintln!("Bulletin Board error {:?}",error);
+    EmailValidationError::CouldNotWriteToBulletinBoard
+}
 
 /// Information to request that an email be sent asking for verification.
 #[derive(Debug,Clone,Serialize,Deserialize,Eq,PartialEq)]
 pub struct RequestEmailValidation {
-    uid : UserUID, // uid making the query
     email : String, // email address to be validated
     why : EmailValidationReason,
-    signature : Signature, // signature of UTF-8 encoding of uid|0|email|0|why(as string)
+}
+
+pub static EMAIL_VALIDATION_CODE_STORAGE : Lazy<Mutex<TimeLimitedHashMap<HashValue,(u32,ClientSigned<RequestEmailValidation>)>>> = Lazy::new(||Mutex::new(TimeLimitedHashMap::new(Duration::from_secs(3600))));
+
+impl RequestEmailValidation {
+    /// Deal with a RequestEmailValidation
+    /// * Post the request to the bulletin board? Should this be done??
+    /// * Make a response code and email it to the requested email address.
+    /// * Store said code for use with EmailProof.
+    /// TODO implement some way to stop this being used for DOS spam.
+    ///
+    /// Returns a hash value that can be used for EmailProof.
+    pub async fn process(sig : &ClientSigned<RequestEmailValidation>) -> Result<HashValue, EmailValidationError> {
+        let code : u32 = rand::thread_rng().gen_range(0..1000000);
+        println!("Consider this an email to {} with code {}",sig.parsed.email,code); // TODO actually send email.
+        let hash = { // TODO could possibly write to the bulletin board about the request. But don't want to do for personal email addresses.
+            let data = serde_json::ser::to_string(&sig.signed_message).unwrap();
+            let mut hasher = Sha256::default();
+            hasher.update(data.as_bytes());
+            HashValue(<[u8; 32]>::from(hasher.finalize()))
+        };
+        EMAIL_VALIDATION_CODE_STORAGE.lock().unwrap().insert(hash,(code,sig.clone()));
+        Ok(hash)
+    }
 }
 
 #[derive(Debug,Clone,Serialize,Deserialize,Eq,PartialEq)]
 pub enum EmailValidationReason {
-    AsMP,
+    AsMP(bool), // if argument is true, the principal. Otherwise a staffer with access to email.
     AsOrg,
     AccountRecovery,
     RevokeMP(UserUID), // revoke a given UID.
@@ -213,12 +278,45 @@ pub enum EmailValidationReason {
 /// Information to request that an email be sent asking for verification.
 #[derive(Debug,Clone,Serialize,Deserialize,Eq,PartialEq)]
 pub struct EmailProof {
-    uid : UserUID, // uid making the query
-    pin : String, // email address to be validated
-    signature : Signature, // signature of UTF-8 encoding of uid|pin
+    hash : HashValue, // value returned from RequestEmailValidation::process()
+    code : u32, // email address to be validated
 }
 
-
+impl EmailProof {
+    pub async fn process(sig : &ClientSigned<EmailProof>) -> Result<Option<HashValue>, EmailValidationError> {
+        if let Some((code,initial_request)) = EMAIL_VALIDATION_CODE_STORAGE.lock().unwrap().get(&sig.parsed.hash) {
+            if initial_request.signed_message.user!=sig.signed_message.user { return Err(EmailValidationError::WrongUser)}
+            if *code!=sig.parsed.code { return Err(EmailValidationError::WrongCode)}
+            // successfully verified!
+            match &initial_request.parsed.why {
+                EmailValidationReason::AsMP(principal) => {
+                    let mps = MPSpec::get();
+                    let mps = (*mps).as_ref().map_err(internal_error_email)?;
+                    let mp = mps.find_by_email(&initial_request.parsed.email).ok_or(EmailValidationError::MPEmailNotKnown)?;
+                    let badge = Badge{
+                        badge: if *principal {BadgeType::MP} else {BadgeType::MPStaff},
+                        what: mp.first_name.to_string()+" "+&mp.surname
+                    };
+                    badge.store_in_database(&initial_request.signed_message.user).await.map_err(internal_error_email)?;
+                    let bb_hash = LogInBulletinBoard::EmailVerification(initial_request.clone()).log_in_bulletin_board().await.map_err(bulletin_board_error_email)?;
+                    Ok(Some(bb_hash))
+                }
+                EmailValidationReason::AsOrg => {
+                    Err(EmailValidationError::InternalError) // TODO
+                }
+                EmailValidationReason::AccountRecovery => {
+                    Err(EmailValidationError::InternalError) // TODO
+                }
+                EmailValidationReason::RevokeMP(_uid) => {
+                    Err(EmailValidationError::InternalError) // TODO
+                }
+                EmailValidationReason::RevokeOrg(_uid) => {
+                    Err(EmailValidationError::InternalError) // TODO
+                }
+            }
+        } else { Err(EmailValidationError::NoCodeOrExpired)}
+    }
+}
 /// Information for the EditRegistration function
 #[derive(Debug,Clone,Serialize,Deserialize,Eq,PartialEq)]
 pub struct EditRegistration {

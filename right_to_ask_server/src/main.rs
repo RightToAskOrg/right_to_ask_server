@@ -2,7 +2,7 @@ use actix_web::{HttpServer, middleware, web};
 use actix_web::{get, post};
 use std::path::PathBuf;
 use actix_web::web::Json;
-use right_to_ask_api::person::{NewRegistration, get_list_of_all_users, get_count_of_all_users, UserInfo, get_user_by_id};
+use right_to_ask_api::person::{NewRegistration, get_list_of_all_users, get_count_of_all_users, UserInfo, get_user_by_id, RequestEmailValidation, EmailProof};
 use merkle_tree_bulletin_board::hash::HashValue;
 use right_to_ask_api::database::get_bulletin_board;
 use merkle_tree_bulletin_board::hash_history::{FullProof, HashInfo};
@@ -26,6 +26,31 @@ async fn new_question(command : Json<ClientSigned<NewQuestionCommand>>) -> Json<
         Json(signed)
     }
 }
+
+
+#[post("/request_email_validation")]
+async fn request_email_validation(command : Json<ClientSigned<RequestEmailValidation>>) -> Json<Result<ServerSigned,String>> {
+    if let Err(signing_error) = command.signed_message.check_signature().await {
+        Json(Err(signing_error.to_string()))
+    } else {
+        let res = RequestEmailValidation::process(&command).await;
+        let signed = ServerSigned::sign_string(res);
+        Json(signed)
+    }
+}
+
+#[post("/email_proof")]
+async fn email_proof(command : Json<ClientSigned<EmailProof>>) -> Json<Result<Option<ServerSigned>,String>> {
+    if let Err(signing_error) = command.signed_message.check_signature().await {
+        Json(Err(signing_error.to_string()))
+    } else {
+        let res = EmailProof::process(&command).await;
+        let signed = res.map_err(|e|e.to_string()).map(|oh|oh.map(|h|ServerSigned::new_string(h.to_string())));
+        Json(signed)
+    }
+}
+
+
 
 
 
@@ -169,6 +194,8 @@ async fn main() -> anyhow::Result<()> {
             .service(get_server_public_key_spki)
             .service(get_server_public_key_raw)
             .service(new_registration)
+            .service(request_email_validation)
+            .service(email_proof)
             .service(new_question)
             .service(get_user_list)
             .service(get_user)

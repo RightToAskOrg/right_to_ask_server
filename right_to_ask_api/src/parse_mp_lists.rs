@@ -19,7 +19,7 @@ use tempfile::NamedTempFile;
 use std::path::{PathBuf, Path};
 use std::io::Write;
 use std::fs::File;
-use crate::mp::MP;
+use crate::mp::{MP, MPSpec};
 use crate::regions::{Electorate, Chamber, State, RegionContainingOtherRegions};
 use std::str::FromStr;
 use anyhow::anyhow;
@@ -30,11 +30,10 @@ use itertools::Itertools;
 use crate::parse_pdf_util::{parse_pdf_to_strings_with_same_font, extract_string};
 use regex::Regex;
 use calamine::{open_workbook, Xls, Reader, Xlsx};
-use serde::{Serialize,Deserialize};
 
 /// Temporary file directory. Should be in same filesystem as MP_SOURCE.
 const TEMP_DIR : &'static str = "data/temp";
-const MP_SOURCE : &'static str = "data/MP_source";
+pub const MP_SOURCE : &'static str = "data/MP_source";
 /// Download from a URL to a temporary file.
 async fn download_to_file(url:&str) -> anyhow::Result<NamedTempFile> {
     println!("Downloading {}",url);
@@ -596,13 +595,7 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
 
 }
 
-/// A list of MPs and some useful things for working out regions.
-#[derive(Serialize,Deserialize)]
-pub struct MPSpec {
-    pub mps : Vec<MP>,
-    pub federal_electorates_by_state : Vec<RegionContainingOtherRegions>,
-    pub vic_districts : Vec<RegionContainingOtherRegions>,
-}
+
 
 /// Create "data/MP_source/MPs.json" from the source files downloaded by update_mp_list_of_files(). Second of the two stages for generating MPs.json
 pub fn create_mp_list() -> anyhow::Result<()> {

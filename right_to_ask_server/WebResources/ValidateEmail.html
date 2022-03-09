@@ -1,0 +1,46 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="common.css">
+    <script src="util.js"></script>
+    <script src="common.js"></script>
+    <script src="ValidateEmail.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tweetnacl/1.0.3/nacl-fast.min.js"></script>
+    <title>Add Question - Testing only</title>
+</head>
+<body>
+
+<p>Note: This is not for production use. It is for testing purposes only.</p>
+
+<label for="UID">User requesting validation of email: </label><input type="text" id="UID"/><br/>
+<label for="PrivateKey">User private key: </label><input type="text" id="PrivateKey" value="BnOkmaSF831Yamnch5HZIPMsD5riLblPbcHn9tfiGHtli5htv87Gd9A1cy/jtxjgyAx8k3/ds2gvSQg+oRo6Ww=="/><br/>
+Note: This is the private key for the default public key on the AddUser page. Do not use it for any real user, or in production in any way.<br/>
+
+<h4>Request Email</h4>
+
+<label for="Email">Email: </label><input type="text" id="Email"/><br/>
+<label for="Purpose">Purpose: </label><select id="Purpose">
+    <option value="MP">As MP</option>
+    <option value="MPStaffer">As MP staff</option>
+    <option value="Org">As MP organisation</option>
+    <option value="revokeMP">Revoke MP (or staffer) status</option>
+    <option value="revokeOrg">Revoke Org status</option>
+</select><br/>
+<label for="Revokee">Person being revoked (ignore if not a revocation): </label><input type="text" id="Revokee"/><br/>
+
+<button id="RequestEmail">Request Email</button><br/>
+
+<h4>Prove Received Email</h4>
+
+<label for="Code">Code sent in email: </label><input type="text" id="Code"/><br/>
+
+<button id="VerifyCode">Verify Code</button><br/>
+
+<div id="status">
+    <h5>Status</h5>
+</div>
+
+</body>
+</html>

@@ -11,9 +11,10 @@ use merkle_tree_bulletin_board::BulletinBoard;
 use merkle_tree_bulletin_board::hash::HashValue;
 use mysql::prelude::Queryable;
 use crate::config::CONFIG;
-use crate::person::NewRegistration;
+use crate::person::{NewRegistration, RequestEmailValidation};
 use crate::question::NewQuestionCommandPostedToBulletinBoard;
 use serde::{Serialize,Deserialize};
+use crate::signing::ClientSigned;
 
 fn get_rta_database_pool_raw() -> Pool {
     let opts = Opts::from_url(&CONFIG.database.rta).expect("Could not parse database_url url");
@@ -48,6 +49,7 @@ pub async fn get_bulletin_board() -> MutexGuard<'static,BulletinBoard<BackendJou
 #[derive(Serialize,Deserialize,Debug,Clone)]
 pub enum LogInBulletinBoard {
     NewUser(NewRegistration),
+    EmailVerification(ClientSigned<RequestEmailValidation>),
     NewQuestion(NewQuestionCommandPostedToBulletinBoard),
 }
 
