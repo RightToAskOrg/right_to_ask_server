@@ -26,6 +26,11 @@ pub struct MP {
 }
 
 impl MP {
+    /// Get the name associated with a badge for an MP.
+    /// This is `FirstName surname @emaildomain`
+    pub fn badge_name(&self) -> String {
+        self.first_name.to_string()+" "+&self.surname+" "+self.email.trim_start_matches(|c|c!='@')
+    }
 }
 
 impl Display for MP {

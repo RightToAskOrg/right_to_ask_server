@@ -2,7 +2,7 @@ use actix_web::{HttpServer, middleware, web};
 use actix_web::{get, post};
 use std::path::PathBuf;
 use actix_web::web::Json;
-use right_to_ask_api::person::{NewRegistration, get_list_of_all_users, get_count_of_all_users, UserInfo, get_user_by_id, RequestEmailValidation, EmailProof};
+use right_to_ask_api::person::{NewRegistration, get_list_of_all_users, get_count_of_all_users, UserInfo, get_user_by_id, RequestEmailValidation, EmailProof, EmailAddress};
 use merkle_tree_bulletin_board::hash::HashValue;
 use right_to_ask_api::database::get_bulletin_board;
 use merkle_tree_bulletin_board::hash_history::{FullProof, HashInfo};
@@ -29,7 +29,7 @@ async fn new_question(command : Json<ClientSigned<NewQuestionCommand>>) -> Json<
 
 
 #[post("/request_email_validation")]
-async fn request_email_validation(command : Json<ClientSigned<RequestEmailValidation>>) -> Json<Result<ServerSigned,String>> {
+async fn request_email_validation(command : Json<ClientSigned<RequestEmailValidation,EmailAddress>>) -> Json<Result<ServerSigned,String>> {
     if let Err(signing_error) = command.signed_message.check_signature().await {
         Json(Err(signing_error.to_string()))
     } else {

@@ -59,7 +59,7 @@ pub fn sign_message(message : &[u8]) -> String {
 }
 
 #[derive(Serialize,Deserialize,Debug,Clone)]
-#[serde(try_from = "ClientSignedUnparsed")]
+#[serde(try_from = "ClientSignedUnparsed<U>")]
 #[serde(bound(deserialize = "T: DeserializeOwned"))]
 /// This is a signed message from the client to the server.
 ///
@@ -68,9 +68,9 @@ pub fn sign_message(message : &[u8]) -> String {
 /// is not necessarily unique, it is needed to specifically keep the encoding around. This structure
 /// transparently serializes/deserializes as if it were a [ClientSignedUnparsed] message,
 /// but also decoding to a parsed value.
-pub struct ClientSigned<T> {
+pub struct ClientSigned<T,U=()> where U: DeserializeOwned {
     #[serde(flatten)]
-    pub signed_message : ClientSignedUnparsed,
+    pub signed_message : ClientSignedUnparsed<U>,
     #[serde(skip_serializing,bound="")]
     pub parsed : T,
 }
@@ -80,19 +80,24 @@ pub struct ClientSigned<T> {
 /// The message is generally some JSON encoded data.
 ///
 /// [ClientSigned] is a more type safe version, handling parsing automatically.
-pub struct ClientSignedUnparsed {
+///
+/// There might be extra, unsigned fields (such as an email address) which are
+/// included in U, if specified.
+pub struct ClientSignedUnparsed<U=()> {
     /// The message is a JSON encoding of the actual command being sent from the client. The actual command is of type T.
     pub message : String,
     /// the signature of the message
     pub signature : String,
     /// unique ID of the user
     pub user : String,
+    #[serde(flatten)]
+    pub unsigned : U,
 }
 
-impl <T> TryFrom<ClientSignedUnparsed> for ClientSigned<T> where T: DeserializeOwned {
+impl <T,U> TryFrom<ClientSignedUnparsed<U>> for ClientSigned<T,U> where T: DeserializeOwned, U : DeserializeOwned {
     type Error = anyhow::Error;
 
-    fn try_from(signed_message: ClientSignedUnparsed) -> Result<Self, Self::Error> {
+    fn try_from(signed_message: ClientSignedUnparsed<U>) -> Result<Self, Self::Error> {
         let parsed : T = serde_json::from_str(&signed_message.message)?;
         Ok(ClientSigned{ signed_message , parsed })
     }
@@ -112,8 +117,9 @@ impl Display for SignatureCheckError {
     }
 }
 
-impl ClientSignedUnparsed {
+impl <U> ClientSignedUnparsed<U> {
 
+    /// Check the signature, return Ok(()) if good, otherwise an error.
     pub async fn check_signature(&self) -> Result<(), SignatureCheckError> {
         if let Some(public_key) = get_user_public_key_by_id(&self.user).await.map_err(|_| SignatureCheckError::InternalError)? {
             let public_key = base64::decode(&public_key).map_err(|_| SignatureCheckError::InvalidPublicKeyFormat)?;
@@ -122,6 +128,16 @@ impl ClientSignedUnparsed {
             let signature = Signature::from_bytes(&signature).map_err(|_| SignatureCheckError::InvalidSignatureFormat)?;
             public_key.verify(self.message.as_bytes(),&signature).map_err(|_| SignatureCheckError::BadSignature)
         } else { Err(SignatureCheckError::NoSuchUser) }
+    }
+
+    /// Clone this, discarding any unsigned part. If (as usually) U=() then this is same as clone().
+    pub fn just_signed_part(&self) -> ClientSignedUnparsed<()> {
+        ClientSignedUnparsed{
+            message: self.message.clone(),
+            signature: self.signature.clone(),
+            user: self.user.clone(),
+            unsigned: ()
+        }
     }
 }
 

@@ -87,15 +87,16 @@ pub enum BadgeType {
 #[derive(Debug,Clone,Serialize,Deserialize,Eq,PartialEq)]
 pub struct Badge {
     badge : BadgeType,
-    what : String,
+    /// What the badge is about (the text on a badge)
+    /// For an MP, this is MP::badge_name, for an organization it is the domain.
+    name: String,
 }
 
 impl Badge {
     async fn store_in_database(&self,uid:&str) -> mysql::Result<()> {
-        let what = if self.what.len()<50 { &self.what } else { &self.what[0..50] };
         let mut conn = get_rta_database_connection().await?;
         let mut tx = conn.start_transaction(TxOpts::default())?;
-        tx.exec_drop("insert into BADGES (UID,badge,what) values (?,?,?)",(uid,&self.badge,what))?;
+        tx.exec_drop("insert into BADGES (UID,badge,what) values (?,?,?)",(uid,&self.badge,&self.name))?;
         tx.commit()?;
         Ok(())
     }
@@ -190,7 +191,7 @@ pub async fn get_count_of_all_users() -> mysql::Result<usize> {
 pub async fn get_user_by_id(uid:&str) -> mysql::Result<Option<UserInfo>> {
     let mut conn = get_rta_database_connection().await?;
     let electorates = conn.exec_map("SELECT Chamber,Electorate from ELECTORATES where UID=?",(uid,),|(chamber,location)|Electorate{ chamber, region: location })?;
-    let badges = conn.exec_map("SELECT badge,what from BADGES where UID=?",(uid,),|(badge,what)|Badge{ badge, what })?;
+    let badges = conn.exec_map("SELECT badge,what from BADGES where UID=?",(uid,),|(badge,name)|Badge{ badge, name })?;
     if let Some((display_name,state,public_key)) = conn.exec_first("SELECT DisplayName,AusState,PublicKey from USERS where UID=?",(uid,))? {
         Ok(Some(UserInfo{
             uid : uid.to_string(),
@@ -216,6 +217,7 @@ pub enum EmailValidationError {
     InternalError,
     CouldNotWriteToBulletinBoard,
     MPEmailNotKnown,
+    BadgeNameDoesNotMatchEmailAddress,
 }
 
 impl fmt::Display for EmailValidationError {
@@ -236,11 +238,17 @@ fn bulletin_board_error_email(error:anyhow::Error) -> EmailValidationError {
 /// Information to request that an email be sent asking for verification.
 #[derive(Debug,Clone,Serialize,Deserialize,Eq,PartialEq)]
 pub struct RequestEmailValidation {
-    email : String, // email address to be validated
     why : EmailValidationReason,
+    /// the "name" of the badge. For an MP, the [MP::badge_name], for an organization the domain name, for an account recovery...TBD. Possibly the new key?
+    name : String,
 }
 
-pub static EMAIL_VALIDATION_CODE_STORAGE : Lazy<Mutex<TimeLimitedHashMap<HashValue,(u32,ClientSigned<RequestEmailValidation>)>>> = Lazy::new(||Mutex::new(TimeLimitedHashMap::new(Duration::from_secs(3600))));
+#[derive(Debug,Clone,Serialize,Deserialize,Eq,PartialEq)]
+pub struct EmailAddress {
+    email : String,
+}
+
+pub static EMAIL_VALIDATION_CODE_STORAGE : Lazy<Mutex<TimeLimitedHashMap<HashValue,(u32,ClientSigned<RequestEmailValidation,EmailAddress>)>>> = Lazy::new(||Mutex::new(TimeLimitedHashMap::new(Duration::from_secs(3600))));
 
 impl RequestEmailValidation {
     /// Deal with a RequestEmailValidation
@@ -250,13 +258,14 @@ impl RequestEmailValidation {
     /// TODO implement some way to stop this being used for DOS spam.
     ///
     /// Returns a hash value that can be used for EmailProof.
-    pub async fn process(sig : &ClientSigned<RequestEmailValidation>) -> Result<HashValue, EmailValidationError> {
+    pub async fn process(sig : &ClientSigned<RequestEmailValidation,EmailAddress>) -> Result<HashValue, EmailValidationError> {
         let code : u32 = rand::thread_rng().gen_range(0..1000000);
-        println!("Consider this an email to {} with code {}",sig.parsed.email,code); // TODO actually send email.
-        let hash = { // TODO could possibly write to the bulletin board about the request. But don't want to do for personal email addresses.
+        println!("Consider this an email to {} with code {}",sig.signed_message.unsigned.email,code); // TODO actually send email.
+        let hash = {
             let data = serde_json::ser::to_string(&sig.signed_message).unwrap();
             let mut hasher = Sha256::default();
             hasher.update(data.as_bytes());
+            hasher.update(sig.signed_message.unsigned.email.as_bytes());
             HashValue(<[u8; 32]>::from(hasher.finalize()))
         };
         EMAIL_VALIDATION_CODE_STORAGE.lock().unwrap().insert(hash,(code,sig.clone()));
@@ -292,13 +301,14 @@ impl EmailProof {
                 EmailValidationReason::AsMP(principal) => {
                     let mps = MPSpec::get();
                     let mps = (*mps).as_ref().map_err(internal_error_email)?;
-                    let mp = mps.find_by_email(&initial_request.parsed.email).ok_or(EmailValidationError::MPEmailNotKnown)?;
+                    let mp = mps.find_by_email(&initial_request.signed_message.unsigned.email).ok_or(EmailValidationError::MPEmailNotKnown)?;
+                    if mp.badge_name()!=initial_request.parsed.name { return Err(EmailValidationError::BadgeNameDoesNotMatchEmailAddress)}
                     let badge = Badge{
                         badge: if *principal {BadgeType::MP} else {BadgeType::MPStaff},
-                        what: mp.first_name.to_string()+" "+&mp.surname
+                        name: initial_request.parsed.name.clone(),
                     };
                     badge.store_in_database(&initial_request.signed_message.user).await.map_err(internal_error_email)?;
-                    let bb_hash = LogInBulletinBoard::EmailVerification(initial_request.clone()).log_in_bulletin_board().await.map_err(bulletin_board_error_email)?;
+                    let bb_hash = LogInBulletinBoard::EmailVerification(initial_request.signed_message.just_signed_part()).log_in_bulletin_board().await.map_err(bulletin_board_error_email)?;
                     Ok(Some(bb_hash))
                 }
                 EmailValidationReason::AsOrg => {

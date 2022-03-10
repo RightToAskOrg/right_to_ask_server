@@ -37,7 +37,7 @@ create table if not exists BADGES
 (
     UID         VARCHAR(30) NOT NULL,
     badge       ENUM('EmailDomain','MP','MPStaff') NOT NULL,
-    what        VARCHAR(50) NOT NULL,
+    what        TEXT NOT NULL,
     INDEX (UID)
 );
 
