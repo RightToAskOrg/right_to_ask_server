@@ -115,7 +115,7 @@ impl ConvIr<Chamber> for Chamber {
 				b"NSW_Legislative_Council" => Ok(Chamber::NSW_Legislative_Council),
 				b"NT_Legislative_Assembly" => Ok(Chamber::NT_Legislative_Assembly),
 				b"Qld_Legislative_Assembly" => Ok(Chamber::Qld_Legislative_Assembly),
-				b"SA_Legislative_Assembly" => Ok(Chamber::SA_House_Of_Assembly),
+				b"SA_House_Of_Assembly" => Ok(Chamber::SA_House_Of_Assembly),
 				b"SA_Legislative_Council" => Ok(Chamber::SA_Legislative_Council),
 				b"Vic_Legislative_Assembly" => Ok(Chamber::Vic_Legislative_Assembly),
 				b"Vic_Legislative_Council" => Ok(Chamber::Vic_Legislative_Council),
@@ -123,7 +123,10 @@ impl ConvIr<Chamber> for Chamber {
 				b"Tas_Legislative_Council" => Ok(Chamber::Tas_Legislative_Council),
 				b"WA_Legislative_Assembly" => Ok(Chamber::WA_Legislative_Assembly),
 				b"WA_Legislative_Council" => Ok(Chamber::WA_Legislative_Council),
-				_ => Err(FromValueError(Value::Bytes(bytes))),
+				_ => {
+					println!("Found unexpected chamber {:?} in region.rs/ConvIr<Chamber>",String::from_utf8_lossy(&bytes));
+					Err(FromValueError(Value::Bytes(bytes)))
+				},
 			},
 			v => Err(FromValueError(v)),
 		}
