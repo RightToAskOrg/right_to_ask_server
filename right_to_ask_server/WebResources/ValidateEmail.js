@@ -5,7 +5,8 @@ function getWhy() {
         case "MP" : return {"AsMP":true};
         case "MPStaffer" : return  {"AsMP":false};
         case "Org" : return "AsOrg";
-        case "revokeMP" : return {"RevokeMP" : document.getElementById("Revokee").value};
+        case "revokeMP" : return {"RevokeMP" : [document.getElementById("Revokee").value,true]};
+        case "revokeMPStaffer" : return {"RevokeMP" : [document.getElementById("Revokee").value,false]};
         case "revokeOrg" : return {"RevokeOrg" : document.getElementById("Revokee").value};
     }
     failure("Need to say why");

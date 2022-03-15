@@ -22,12 +22,13 @@ Note: This is the private key for the default public key on the AddUser page. Do
 <h4>Request Email</h4>
 
 <label for="Email">Email: </label><input type="text" id="Email"/><br/>
-<label for="BadgeName">Badge name: </label><input type="text" id="BadgeName"/> for an MP this is <span class="program">FirstName Surname @emaildomain</span>, for a domain the is the domain<br/>
+<label for="BadgeName">Badge name: </label><input type="text" id="BadgeName"/> for an MP this is <span class="program">FirstName Surname @emaildomain</span>, for a domain this is the domain starting with the @ character.<br/>
 <label for="Purpose">Purpose: </label><select id="Purpose">
     <option value="MP">As MP</option>
     <option value="MPStaffer">As MP staff</option>
     <option value="Org">As MP organisation</option>
-    <option value="revokeMP">Revoke MP (or staffer) status</option>
+    <option value="revokeMP">Revoke MP status</option>
+    <option value="revokeMPStaffer">Revoke MP staff status</option>
     <option value="revokeOrg">Revoke Org status</option>
 </select><br/>
 <label for="Revokee">Person being revoked (ignore if not a revocation): </label><input type="text" id="Revokee"/><br/>

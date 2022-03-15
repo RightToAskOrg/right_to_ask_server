@@ -107,6 +107,14 @@ impl Badge {
         tx.commit()?;
         Ok(())
     }
+    // removes a badge from the database.
+    async fn remove_from_database(&self,uid:&str) -> mysql::Result<()> {
+        let mut conn = get_rta_database_connection().await?;
+        let mut tx = conn.start_transaction(TxOpts::default())?;
+        tx.exec_drop("delete from BADGES where UID=? and badge=? and what=?",(uid,&self.badge,&self.name))?;
+        tx.commit()?;
+        Ok(())
+    }
 }
 
 // Provide Display & to_string() for BadgeType enum
@@ -285,7 +293,7 @@ pub enum EmailValidationReason {
     AsMP(bool), // if argument is true, the principal. Otherwise a staffer with access to email.
     AsOrg,
     AccountRecovery,
-    RevokeMP(UserUID), // revoke a given UID.
+    RevokeMP(UserUID,bool), // revoke a given UID. bool same meaning as AsMP.
     RevokeOrg(UserUID), // revoke a given UID
 }
 
@@ -299,6 +307,8 @@ pub struct EmailProof {
 }
 
 impl EmailProof {
+    /// Action the email proof. Assign the appropriate badge (or unassign as appropriate).
+    /// TODO it would be good to tell people they have been revoked, and by whom.
     pub async fn process(sig : &ClientSigned<EmailProof>) -> Result<Option<HashValue>, EmailValidationError> {
         if let Some((code,initial_request)) = EMAIL_VALIDATION_CODE_STORAGE.lock().unwrap().get(&sig.parsed.hash) {
             if initial_request.signed_message.user!=sig.signed_message.user { return Err(EmailValidationError::WrongUser)}
@@ -315,22 +325,42 @@ impl EmailProof {
                         name: initial_request.parsed.name.clone(),
                     };
                     badge.store_in_database(&initial_request.signed_message.user).await.map_err(internal_error_email)?;
-                    let bb_hash = LogInBulletinBoard::EmailVerification(initial_request.signed_message.just_signed_part()).log_in_bulletin_board().await.map_err(bulletin_board_error_email)?;
-                    Ok(Some(bb_hash))
                 }
                 EmailValidationReason::AsOrg => {
-                    Err(EmailValidationError::InternalError) // TODO
+                    let domain = initial_request.signed_message.unsigned.email.trim_start_matches(|c|c!='@');
+                    if domain!=initial_request.parsed.name.as_str() { return Err(EmailValidationError::BadgeNameDoesNotMatchEmailAddress)}
+                    let badge = Badge{
+                        badge: BadgeType::EmailDomain,
+                        name: initial_request.parsed.name.clone(),
+                    };
+                    badge.store_in_database(&initial_request.signed_message.user).await.map_err(internal_error_email)?;
                 }
                 EmailValidationReason::AccountRecovery => {
-                    Err(EmailValidationError::InternalError) // TODO
+                    return Err(EmailValidationError::InternalError); // TODO
                 }
-                EmailValidationReason::RevokeMP(_uid) => {
-                    Err(EmailValidationError::InternalError) // TODO
+                EmailValidationReason::RevokeMP(uid,principal) => {
+                    let mps = MPSpec::get();
+                    let mps = (*mps).as_ref().map_err(internal_error_email)?;
+                    let mp = mps.find_by_email(&initial_request.signed_message.unsigned.email).ok_or(EmailValidationError::MPEmailNotKnown)?;
+                    if mp.badge_name()!=initial_request.parsed.name { return Err(EmailValidationError::BadgeNameDoesNotMatchEmailAddress)}
+                    let badge = Badge{
+                        badge: if *principal {BadgeType::MP} else {BadgeType::MPStaff},
+                        name: initial_request.parsed.name.clone(),
+                    };
+                    badge.remove_from_database(uid).await.map_err(internal_error_email)?;
                 }
-                EmailValidationReason::RevokeOrg(_uid) => {
-                    Err(EmailValidationError::InternalError) // TODO
+                EmailValidationReason::RevokeOrg(uid) => {
+                    let domain = initial_request.signed_message.unsigned.email.trim_start_matches(|c|c!='@');
+                    if domain!=initial_request.parsed.name.as_str() { return Err(EmailValidationError::BadgeNameDoesNotMatchEmailAddress)}
+                    let badge = Badge{
+                        badge: BadgeType::EmailDomain,
+                        name: initial_request.parsed.name.clone(),
+                    };
+                    badge.remove_from_database(uid).await.map_err(internal_error_email)?;
                 }
             }
+            let bb_hash = LogInBulletinBoard::EmailVerification(initial_request.signed_message.just_signed_part()).log_in_bulletin_board().await.map_err(bulletin_board_error_email)?;
+            Ok(Some(bb_hash))
         } else { Err(EmailValidationError::NoCodeOrExpired)}
     }
 }
