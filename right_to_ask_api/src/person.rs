@@ -60,7 +60,14 @@ pub enum RegistrationError {
     InternalError,
     CouldNotWriteToBulletinBoard,
 }
-
+fn bulletin_board_error(error:anyhow::Error) -> RegistrationError {
+    eprintln!("Bulletin Board error {:?}",error);
+    RegistrationError::CouldNotWriteToBulletinBoard
+}
+fn internal_error<T:Debug>(error:T) -> RegistrationError {
+    eprintln!("Internal error {:?}",error);
+    RegistrationError::InternalError
+}
 #[derive(Debug,Clone,Serialize,Deserialize,Eq,PartialEq)]
 pub struct UserInfo {
     uid : UserUID,
@@ -170,7 +177,7 @@ impl NewRegistration {
                 return Err(RegistrationError::InternalError);
             }
         }
-        let hash = LogInBulletinBoard::NewUser(self.clone()).log_in_bulletin_board().await.map_err(|_|RegistrationError::CouldNotWriteToBulletinBoard)?;
+        let hash = LogInBulletinBoard::NewUser(self.clone()).log_in_bulletin_board().await.map_err(bulletin_board_error)?;
         println!("Registered uid={} display_name={:?} state={:?} electorates={:?} public_key={}",self.uid,self.display_name,self.state,self.electorates,self.public_key);
         Ok(hash)
     }
@@ -327,17 +334,40 @@ impl EmailProof {
         } else { Err(EmailValidationError::NoCodeOrExpired)}
     }
 }
+
 /// Information for the EditRegistration function
 #[derive(Debug,Clone,Serialize,Deserialize,Eq,PartialEq)]
-pub struct EditRegistration {
-    uid : UserUID,
+pub struct EditUserDetails {
     #[serde(default,skip_serializing_if = "Option::is_none")]
     display_name : Option<String>,
-    #[serde(default,skip_serializing_if = "Option::is_none")]
-    public_key : Option<PublicKey>,
-    #[serde(default,skip_serializing_if = "Option::is_none")]
-    state : Option<State>,
+    #[serde(default,skip_serializing_if = "Option::is_none",with = "::serde_with::rust::double_option")]
+    state : Option<Option<State>>,
     #[serde(default,skip_serializing_if = "Option::is_none")]
     electorates : Option<Vec<Electorate>>,
-    signature : Signature, // signature of UTF-8 encoding of uid,display_name,public_key,state,electorates.
+}
+
+impl EditUserDetails {
+    /// Change the user details, returning the bulletin board entry.
+    pub async fn edit_user(edits:&ClientSigned<EditUserDetails>) -> Result<HashValue,RegistrationError> {
+        let mut conn = get_rta_database_connection().await.map_err(internal_error)?;
+        let mut transaction = conn.start_transaction(TxOpts::default()).map_err(internal_error)?;
+        if let Some(display_name) = &edits.parsed.display_name {
+            if display_name.len()<1 { return Err(RegistrationError::DisplayNameTooShort); }
+            if display_name.len()>60 { return Err(RegistrationError::DisplayNameTooLong); }
+            // Set display name
+            transaction.exec_drop("update USERS set DisplayName=? where UID=?", (display_name,&edits.signed_message.user)).map_err(internal_error)?;
+        }
+        if let Some(state) = &edits.parsed.state {
+            transaction.exec_drop("update USERS set AusState=? where UID=?", (state.map(|s|s.to_string()),&edits.signed_message.user)).map_err(internal_error)?;
+        }
+        if let Some(electorates) = &edits.parsed.electorates {
+            transaction.exec_drop("delete from ELECTORATES where UID=?", (&edits.signed_message.user,)).map_err(internal_error)?;
+            for e in electorates {
+                transaction.exec_drop("insert into ELECTORATES (UID,Chamber,Electorate) values (?,?,?)",(&edits.signed_message.user,&e.chamber.to_string(),&e.region)).map_err(internal_error)?;
+            }
+        }
+        transaction.commit().map_err(internal_error)?;
+        let version = LogInBulletinBoard::EditUser(edits.signed_message.clone()).log_in_bulletin_board().await.map_err(bulletin_board_error)?;
+        Ok(version)
+    }
 }

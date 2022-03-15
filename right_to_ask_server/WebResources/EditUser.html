@@ -7,18 +7,17 @@
     <script src="util.js"></script>
     <script src="common.js"></script>
     <script src="signing.js"></script>
-    <script src="AddUser.js"></script>
+    <script src="EditUser.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tweetnacl/1.0.3/nacl-fast.min.js"></script>
-    <title>Add User - Testing only</title>
+    <title>Edit User - Testing only</title>
 </head>
 <body>
 
 <p>Note: This is not for production use. It is for testing purposes only.</p>
 
-<label for="UID">UID: </label><input type="text" id="UID"/><br/>
+UID: <span id="UID"></span><br/>
 <label for="DisplayName">Display Name: </label><input type="text" id="DisplayName"/><br/>
-<label for="PublicKey">Public Key: </label><input type="text" id="PublicKey" value="ZYuYbb/OxnfQNXMv47cY4MgMfJN/3bNoL0kIPqEaOls="/><br/>
-Note: The provided public key is for test user use only. Do NOT use it in production in any way as anyone will be able to impersonate it. It has private key BnOkmaSF831Yamnch5HZIPMsD5riLblPbcHn9tfiGHtli5htv87Gd9A1cy/jtxjgyAx8k3/ds2gvSQg+oRo6Ww== <br/>
+<label for="PublicKey">Public Key: </label><span id="PublicKey" ></span><br/>
 <label for="State">State: </label><select id="State">
     <option value="empty">Unspecified</option>
     <option value="ACT">ACT</option>
@@ -32,15 +31,14 @@ Note: The provided public key is for test user use only. Do NOT use it in produc
 </select><br/>
 <label for="Electorates">Electorates (semicolon separated list of chamber,electorate with no additional whitespace): </label><input type="text" id="Electorates"/><br/>
 
-<button id="Add">Add</button>
+<label for="PrivateKey">User private key: </label><input type="text" id="PrivateKey" value="BnOkmaSF831Yamnch5HZIPMsD5riLblPbcHn9tfiGHtli5htv87Gd9A1cy/jtxjgyAx8k3/ds2gvSQg+oRo6Ww=="/><br/>
+Note: This is the private key for the default public key on the AddUser page. Do not use it for any real user, or in production in any way.<br/>
+
+<button id="Edit">Edit</button>
 
 
 <div id="status">
     <h5>Status</h5>
-</div>
-
-<h5>User List</h5>
-<div id="UserList">
 </div>
 
 </body>

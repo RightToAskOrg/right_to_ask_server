@@ -49,6 +49,7 @@ pub async fn get_bulletin_board() -> MutexGuard<'static,BulletinBoard<BackendJou
 #[derive(Serialize,Deserialize,Debug,Clone)]
 pub enum LogInBulletinBoard {
     NewUser(NewRegistration),
+    EditUser(ClientSignedUnparsed),
     EmailVerification(ClientSignedUnparsed),
     NewQuestion(NewQuestionCommandPostedToBulletinBoard),
 }

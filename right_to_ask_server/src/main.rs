@@ -2,7 +2,7 @@ use actix_web::{HttpServer, middleware, web};
 use actix_web::{get, post};
 use std::path::PathBuf;
 use actix_web::web::Json;
-use right_to_ask_api::person::{NewRegistration, get_list_of_all_users, get_count_of_all_users, UserInfo, get_user_by_id, RequestEmailValidation, EmailProof, EmailAddress};
+use right_to_ask_api::person::{NewRegistration, get_list_of_all_users, get_count_of_all_users, UserInfo, get_user_by_id, RequestEmailValidation, EmailProof, EmailAddress, EditUserDetails};
 use merkle_tree_bulletin_board::hash::HashValue;
 use right_to_ask_api::database::get_bulletin_board;
 use merkle_tree_bulletin_board::hash_history::{FullProof, HashInfo};
@@ -15,6 +15,19 @@ use right_to_ask_api::question::{NewQuestionCommand, QuestionID, QuestionInfo};
 async fn new_registration(command : Json<NewRegistration>) -> Json<Result<ServerSigned,String>> {
     Json(ServerSigned::sign_string(command.register().await))
 }
+
+#[post("/edit_user")]
+async fn edit_user(command : Json<ClientSigned<EditUserDetails>>) -> Json<Result<ServerSigned,String>> {
+    if let Err(signing_error) = command.signed_message.check_signature().await {
+        Json(Err(signing_error.to_string()))
+    } else {
+        let res = EditUserDetails::edit_user(&command).await;
+        let signed = ServerSigned::sign_string(res);
+        Json(signed)
+    }
+}
+
+
 
 #[post("/new_question")]
 async fn new_question(command : Json<ClientSigned<NewQuestionCommand>>) -> Json<Result<ServerSigned,String>> {
@@ -194,6 +207,7 @@ async fn main() -> anyhow::Result<()> {
             .service(get_server_public_key_spki)
             .service(get_server_public_key_raw)
             .service(new_registration)
+            .service(edit_user)
             .service(request_email_validation)
             .service(email_proof)
             .service(new_question)

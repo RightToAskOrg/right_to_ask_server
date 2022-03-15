@@ -36,6 +36,7 @@ function check_signature(signed) {
 function sign_message(command) {
     let message = JSON.stringify(command);
     let user = document.getElementById("UID").value;
+    if (!user) user = document.getElementById("UID").innerText;
     let privateKey = document.getElementById("PrivateKey").value;
     const privateKeyUint8Array = decodeBase64(privateKey);
     const messageUint8Array = (new TextEncoder()).encode(message);
