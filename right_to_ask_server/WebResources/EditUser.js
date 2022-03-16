@@ -42,7 +42,7 @@ function editUser() {
         status("Illegal electorate "+s);
         return null;
     }
-    if (electorates!==user.electorates.map(e=>e.chamber+","+e.region).join(";")) {
+    if (electorates!==getUserElectorates()) {
         if (electorates.length>0) command.electorates=electorates.split(';').map(describe_electorate);
         else command.electorates=[];
     }
@@ -53,6 +53,10 @@ function editUser() {
 let uid = null;
 let user = null;
 
+function getUserElectorates() {
+    if (user.electorates===undefined) return "";
+    else return user.electorates.map(e=>e.chamber+","+e.region).join(";");
+}
 function setUser(userInfo) {
     console.log(userInfo);
     if (userInfo.Ok) {
@@ -61,7 +65,7 @@ function setUser(userInfo) {
         document.getElementById("PublicKey").innerText=user.public_key;
         document.getElementById("DisplayName").value=user.display_name;
         document.getElementById("State").value=user.state;
-        document.getElementById("Electorates").value=user.electorates.map(e=>e.chamber+","+e.region).join(";");
+        document.getElementById("Electorates").value=getUserElectorates();
     } else if (userInfo.Err) failure("Error : "+data.Err);
 }
 
