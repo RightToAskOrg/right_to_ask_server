@@ -12,7 +12,7 @@ use merkle_tree_bulletin_board::hash::HashValue;
 use mysql::prelude::Queryable;
 use crate::config::CONFIG;
 use crate::person::NewRegistration;
-use crate::question::NewQuestionCommandPostedToBulletinBoard;
+use crate::question::{EditQuestionCommandPostedToBulletinBoard, NewQuestionCommandPostedToBulletinBoard};
 use serde::{Serialize,Deserialize};
 use crate::signing::ClientSignedUnparsed;
 
@@ -52,6 +52,7 @@ pub enum LogInBulletinBoard {
     EditUser(ClientSignedUnparsed),
     EmailVerification(ClientSignedUnparsed),
     NewQuestion(NewQuestionCommandPostedToBulletinBoard),
+    EditQuestion(EditQuestionCommandPostedToBulletinBoard),
 }
 
 impl LogInBulletinBoard {

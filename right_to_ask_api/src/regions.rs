@@ -71,7 +71,7 @@ impl FromValue for State {
 }
 
 /// A chamber of an Australian parliament.
-#[derive(Debug,Clone,Copy,Serialize,Deserialize,Eq,PartialEq)]
+#[derive(Debug,Clone,Copy,Serialize,Deserialize,Eq,PartialEq,Hash)]
 #[allow(non_camel_case_types)]
 pub enum Chamber {
     ACT_Legislative_Assembly,
@@ -142,7 +142,7 @@ impl FromValue for Chamber {
 
 
 /// A generalized electorate, being a chamber, and the particular region for that chamber, unless the chamber has no regions.
-#[derive(Debug,Clone,Serialize,Deserialize,Eq,PartialEq)]
+#[derive(Debug,Clone,Serialize,Deserialize,Eq,PartialEq,Hash)]
 pub struct Electorate {
     pub(crate) chamber : Chamber,
 	#[serde(skip_serializing_if = "Option::is_none",default)]

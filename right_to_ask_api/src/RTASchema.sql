@@ -2,6 +2,11 @@
 drop table if exists USERS;
 drop table if exists ELECTORATES;
 drop table if exists BADGES;
+drop table if exists QUESTIONS;
+drop table if exists MP_IDs;
+drop table if exists Organisations;
+drop table if exists PersonForQuestion;
+drop table if exists Answer;
 
 create table if not exists USERS
 (
@@ -75,19 +80,19 @@ create table if not exists MP_IDs(
        'Tas_Legislative_Council',
        'WA_Legislative_Assembly',
        'WA_Legislative_Council') NOT NULL,
-    Electorate  VARCHAR(50),
-    FirstName   VARCHAR(50),
-    LastName    VARCHAR(50),
+    Electorate  TEXT NULL,
+    FirstName   TEXT,
+    LastName    TEXT,
     Alias   INT, /* A prior name for the same person */
-    INDEX(Electorate),
-    INDEX(FirstName),
-    INDEX(LastName),
+    INDEX(Electorate(30)),
+    INDEX(FirstName(30)),
+    INDEX(LastName(30))
 ) CHARACTER SET utf8;
 
 create table if not exists Organisations(
     id INT PRIMARY KEY NOT NULL AUTO_INCREMENT,
-    OrgID VARCHAR(50) NOT NULL;
-    INDEX(OrgId);
+    OrgID TEXT NOT NULL,
+    INDEX(OrgId(50))
 ) CHARACTER SET utf8;
 
 create table if not exists PersonForQuestion
@@ -97,13 +102,16 @@ create table if not exists PersonForQuestion
     UID VARCHAR(30) NULL,/* reference to UID in Users table, if it is a user */
     MP INT NULL, /* reference to an MP in MP_IDs table, if it is an MP */
     ORG INT NULL, /* reference to an organisation in Organisations table, if it is an organisation */
-    INDEX(QuestionId),
+    INDEX(QuestionId)
 ) CHARACTER SET utf8;
 
 create table if not exists Answer
 (
     QuestionId  BINARY(32), /* reference to QuestionID in QUESTIONS table */
     author      VARCHAR(30) NOT NULL, /* reference to UID in Users table */
+    MP          INT NOT NULL, /* reference to an MP in MP_IDs table */
     timestamp   BIGINT UNSIGNED NOT NULL,
+    answer      TEXT NOT NULL,
     INDEX(QuestionId),
+    INDEX(MP)
 ) CHARACTER SET utf8;

@@ -7,6 +7,7 @@
 // - TODO look for similar questions
 
 
+use std::collections::HashSet;
 use std::convert::TryInto;
 use std::fmt::{Debug, Display, Formatter};
 use serde::{Serialize, Deserialize};
@@ -16,8 +17,8 @@ use mysql::prelude::Queryable;
 use mysql::TxOpts;
 use sha2::{Digest, Sha256};
 use crate::database::{get_rta_database_connection, LogInBulletinBoard};
-use crate::mp::MPId;
-use crate::person::UserUID;
+use crate::mp::{get_org_id_from_database, MPId, MPIndexInDatabaseTable, MPSpec, OrgIndexInDatabaseTable};
+use crate::person::{is_user_mp_or_staffer, user_exists, UserUID};
 use crate::signing::ClientSigned;
 
 /// A question ID is a hash of the question text, the question writer, and the upload timestamp.
@@ -42,6 +43,7 @@ pub enum QuestionError {
     BackgroundTooLong,
     SameQuestionSubmittedRecently,
     OnlyAuthorCanChangeBackground,
+    OnlyAuthorCanChangePermissions,
     CanOnlyExtendBackground,
     FollowUpIsNotAValidQuestion,
     FollowUpIsAlreadySet,
@@ -49,6 +51,13 @@ pub enum QuestionError {
     QuestionDoesNotExist,
     /// The provided last_update hash is not the current last update
     LastUpdateIsNotCurrent,
+    TooLongListOfPeopleAskingQuestion,
+    TooLongListOfPeopleAnsweringQuestion,
+    OrganisationNameTooLong,
+    /// The provided MP is not one we recognise.
+    InvalidMP,
+    /// The user to ask/answer the question does not exist.
+    InvalidUserSpecified,
 }
 
 impl Display for QuestionError {
@@ -61,7 +70,8 @@ const MAX_QUESTION_LENGTH : usize = 280;
 const MIN_QUESTION_LENGTH : usize = 10;
 const MAX_BACKGROUND_LENGTH : usize = 280;
 const MAX_ANSWER_LENGTH : usize = 1000;
-
+const MAX_MPS_WHO_SHOULD_ASK_THE_QUESTION : usize = 10;
+const MAX_MPS_WHO_SHOULD_ANSWER_THE_QUESTION : usize = 10;
 
 
 /*************************************************************************
@@ -103,7 +113,7 @@ impl QuestionDefiningFields {
     }
 }
 
-#[derive(Serialize,Deserialize,Copy,Clone,Debug)]
+#[derive(Serialize,Deserialize,Copy,Clone,Debug,Eq, PartialEq)]
 pub enum Permissions {
     WriterOnly,
     Others,
@@ -124,12 +134,85 @@ impl Permissions {
 }
 pub type OrgID = String;
 
-#[derive(Serialize,Deserialize,Debug,Clone)]
+#[derive(Serialize,Deserialize,Debug,Clone,Eq,PartialEq,Hash)]
 pub enum PersonID {
     User(UserUID),
     MP(MPId),
     Organisation(OrgID),
 }
+
+impl PersonID {
+    /// Get the people who should ask (role='Q') or answer (role='A') a question.
+    fn get_for_question(conn:&mut impl Queryable,role:char,question:QuestionID) -> mysql::Result<Vec<PersonID>> {
+        let elements : Vec<(Option<UserUID>,Option<MPIndexInDatabaseTable>,Option<OrgIndexInDatabaseTable>)> = conn.exec_map("SELECT UID,MP,ORG from PersonForQuestion where QuestionId=? and ROLE=?",(&question.0,role.to_string()),|(uid,mp,org)|(uid,mp,org))?;
+        let mut res = vec![];
+        for (uid,mp,org) in elements {
+            let decoded = {
+                if let Some(uid) = uid { PersonID::User(uid) }
+                else if let Some(mp) = mp { // we may want to cache this for performance.
+                    if let Some(mp_id) = MPId::read_from_database(conn,mp)? {
+                        PersonID::MP(mp_id)
+                    } else {
+                        eprintln!("Missing mp {} for question {} role {}",mp,question,role);
+                        continue;
+                    }
+                } else if let Some(org) = org { // we may want to cache this for performance.
+                    if let Some(org_id) = conn.exec_first::<String,_,_>("select OrgID from Organisations where id=?",(org,))? {
+                        PersonID::Organisation(org_id)
+                    } else {
+                        eprintln!("Missing organisation {} for question {} role {}",org,question,role);
+                        continue;
+                    }
+                } else {
+                    eprintln!("Blank person for question {} role {}",question,role);
+                    continue;
+                }
+            };
+            res.push(decoded);
+        }
+        Ok(res)
+    }
+    /// Add the given people to a given question.
+    fn add_for_question(conn:&mut impl Queryable,role:char,question:QuestionID,people:HashSet<&PersonID>) -> mysql::Result<()> {
+        let mut references : Vec<(Option<UserUID>,Option<MPIndexInDatabaseTable>,Option<OrgIndexInDatabaseTable>)> = vec![];
+        for &person in people.iter() {
+            match person {
+                PersonID::User(uid) => {
+                    references.push((Some(uid.clone()),None,None));
+                }
+                PersonID::MP(mp_id) => {
+                    let id = mp_id.get_id_from_database(conn)?;
+                    references.push((None,Some(id),None));
+                }
+                PersonID::Organisation(org_name) => {
+                    let id = get_org_id_from_database(org_name,conn)?;
+                    references.push((None,None,Some(id)));
+                }
+            }
+        }
+        let role = role.to_string();
+        conn.exec_batch("insert into PersonForQuestion (QuestionId,ROLE,UID,MP,ORG) values (?,?,?,?,?)",references.into_iter().map(|(uid,mp,org)|(question.0,&role,uid,mp,org)))?;
+        Ok(())
+    }
+
+    fn check_sane(&self,conn:&mut impl Queryable) -> Result<(),QuestionError> {
+        match self {
+            PersonID::User(uid) => {
+                if !user_exists(uid,conn).map_err(internal_error)? { return Err(QuestionError::InvalidUserSpecified) }
+            }
+            PersonID::MP(mp_id) => {
+                let mps = MPSpec::get();
+                let mps = (*mps).as_ref().map_err(internal_error)?;
+                if !mps.contains(mp_id) { return Err(QuestionError::InvalidMP) }
+            }
+            PersonID::Organisation(org) => {
+                if org.len()>50 { return Err(QuestionError::OrganisationNameTooLong); }
+            }
+        }
+        Ok(())
+    }
+}
+
 
 fn is_false(x:&bool) -> bool { !*x }
 
@@ -198,6 +281,7 @@ pub struct QuestionNonDefiningFields {
 pub struct QuestionAnswer {
     /// must be a MP
     answered_by : UserUID,
+    mp : MPId,
     answer : String,
     /// set by server - client should not set this when sending to server.
     timestamp : Option<Timestamp>,
@@ -211,7 +295,7 @@ pub struct HansardLink {
 
 
 impl QuestionNonDefiningFields {
-    pub async fn check_legal(&self,is_creator:bool,is_mp:bool,existing:Option<&QuestionInfo>) -> Result<(),QuestionError> {
+    pub async fn check_legal(&self,is_creator:bool,user:&UserUID,existing:Option<&QuestionInfo>) -> Result<(),QuestionError> {
         if let Some(background) = &self.background {
             if background.len()>MAX_BACKGROUND_LENGTH { return Err(QuestionError::BackgroundTooLong); }
             if !is_creator { return Err(QuestionError::OnlyAuthorCanChangeBackground); }
@@ -219,7 +303,7 @@ impl QuestionNonDefiningFields {
         }
         if self.answers.iter().any(|a|a.answer.len()>MAX_ANSWER_LENGTH)  { return Err(QuestionError::AnswerTooLong); }
         if self.answers.iter().any(|a|a.answer.len()>MAX_ANSWER_LENGTH)  { return Err(QuestionError::AnswerTooLong); }
-        if (!self.answers.is_empty()) && !is_mp  { return Err(QuestionError::OnlyMPCanAnswerQuestion); }
+        if (!self.answers.is_empty()) && !is_user_mp_or_staffer(user).await.map_err(internal_error)?  { return Err(QuestionError::OnlyMPCanAnswerQuestion); }
         if let Some(follow_up_to) = self.is_followup_to {
             // check it is a valid question
             let mut conn = get_rta_database_connection().await.map_err(internal_error)?;
@@ -228,6 +312,26 @@ impl QuestionNonDefiningFields {
             if let Some(existing) = existing {
                 if existing.non_defining.is_followup_to.is_some() { return Err(QuestionError::FollowUpIsAlreadySet); }
             }
+        }
+        if !self.who_should_ask_the_question_permissions.is_no_change() {
+            if !is_creator { return Err(QuestionError::OnlyAuthorCanChangePermissions); }
+        }
+        if !self.who_should_answer_the_question_permissions.is_no_change() {
+            if !is_creator { return Err(QuestionError::OnlyAuthorCanChangePermissions); }
+        }
+        if !self.mp_who_should_ask_the_question.is_empty() {
+            let existing = existing.iter().flat_map(|e|e.non_defining.mp_who_should_ask_the_question.iter()).collect::<HashSet<_>>();
+            let extra : HashSet<_> = self.mp_who_should_ask_the_question.iter().filter(|m|!existing.contains(m)).collect();
+            if existing.len()+extra.len() > MAX_MPS_WHO_SHOULD_ASK_THE_QUESTION { return Err(QuestionError::TooLongListOfPeopleAskingQuestion);}
+            let mut conn = get_rta_database_connection().await.map_err(internal_error)?;
+            for e in existing { e.check_sane(&mut conn)? }
+        }
+        if !self.entity_who_should_answer_the_question.is_empty() {
+            let existing = existing.iter().flat_map(|e|e.non_defining.entity_who_should_answer_the_question.iter()).collect::<HashSet<_>>();
+            let extra : HashSet<_> = self.entity_who_should_answer_the_question.iter().filter(|m|!existing.contains(m)).collect();
+            if existing.len()+extra.len() > MAX_MPS_WHO_SHOULD_ANSWER_THE_QUESTION { return Err(QuestionError::TooLongListOfPeopleAnsweringQuestion);}
+            let mut conn = get_rta_database_connection().await.map_err(internal_error)?;
+            for e in existing { e.check_sane(&mut conn)? }
         }
         // TODO finish legal checks.
         Ok(())
@@ -246,6 +350,24 @@ impl QuestionNonDefiningFields {
         if let Some(background) = &self.background {
             println!("Setting background to {}",background);
             transaction.exec_drop("update QUESTIONS set Background=? where QuestionID=?", (background,question_id.0)).map_err(internal_error)?;
+        }
+        if !self.who_should_ask_the_question_permissions.is_no_change() {
+            transaction.exec_drop("update QUESTIONS set CanOthersSetWhoShouldAsk=? where QuestionID=?", (self.who_should_ask_the_question_permissions==Permissions::Others,question_id.0)).map_err(internal_error)?;
+        }
+        if !self.who_should_answer_the_question_permissions.is_no_change() {
+            transaction.exec_drop("update QUESTIONS set CanOthersSetWhoShouldAnswer=? where QuestionID=?", (self.who_should_answer_the_question_permissions==Permissions::Others,question_id.0)).map_err(internal_error)?;
+        }
+        if !self.mp_who_should_ask_the_question.is_empty() {
+            let existing = PersonID::get_for_question(&mut transaction,'Q',question_id).map_err(internal_error)?.into_iter().collect::<HashSet<_>>();
+            let extra : HashSet<_> = self.mp_who_should_ask_the_question.iter().filter(|&m|!existing.contains(m)).collect();
+            if existing.len()+extra.len() > MAX_MPS_WHO_SHOULD_ASK_THE_QUESTION { return Err(QuestionError::TooLongListOfPeopleAskingQuestion);}
+            PersonID::add_for_question(&mut transaction,'Q',question_id,extra).map_err(internal_error)?;
+        }
+        if !self.entity_who_should_answer_the_question.is_empty() {
+            let existing = PersonID::get_for_question(&mut transaction,'A',question_id).map_err(internal_error)?.into_iter().collect::<HashSet<_>>();
+            let extra : HashSet<_> = self.entity_who_should_answer_the_question.iter().filter(|&m|!existing.contains(m)).collect();
+            if existing.len()+extra.len() > MAX_MPS_WHO_SHOULD_ASK_THE_QUESTION { return Err(QuestionError::TooLongListOfPeopleAskingQuestion);}
+            PersonID::add_for_question(&mut transaction,'A',question_id,extra).map_err(internal_error)?;
         }
         if let Some(follow_up_to) = self.is_followup_to {
             transaction.exec_drop("update QUESTIONS set FollowUpTo=? where QuestionID=?", (follow_up_to.0,question_id.0)).map_err(internal_error)?;
@@ -337,7 +459,7 @@ impl NewQuestionCommand {
     pub async fn add_question(question:&ClientSigned<NewQuestionCommand>) -> Result<NewQuestionCommandResponse,QuestionError> {
         if question.parsed.question_text.len()>MAX_QUESTION_LENGTH { return Err(QuestionError::QuestionTooLong); }
         if question.parsed.question_text.len()<MIN_QUESTION_LENGTH { return Err(QuestionError::QuestionTooShort); }
-        question.parsed.non_defining_fields.check_legal(true,false,None).await?;
+        question.parsed.non_defining_fields.check_legal(true,&question.signed_message.user,None).await?;
         let timestamp = timestamp_now().map_err(internal_error)?;
         let question_id = Self::add_question_stub(&question.signed_message.user,&question.parsed.question_text,timestamp).await?;
         let for_bb = NewQuestionCommandPostedToBulletinBoard {
@@ -407,9 +529,9 @@ impl QuestionInfo {
                         defining: QuestionDefiningFields { author, question_text, timestamp },
                         non_defining: QuestionNonDefiningFields {
                             background, // : convert_null_allowed_value_to_option(background),
-                            mp_who_should_ask_the_question: vec![], // TODO
+                            mp_who_should_ask_the_question : PersonID::get_for_question(&mut conn,'Q',question_id).map_err(internal_error)?,
                             who_should_ask_the_question_permissions: if who_should_ask_the_question_permissions { Permissions::Others } else { Permissions::WriterOnly } ,
-                            entity_who_should_answer_the_question: vec![], // TODO
+                            entity_who_should_answer_the_question: PersonID::get_for_question(&mut conn,'A',question_id).map_err(internal_error)?,
                             who_should_answer_the_question_permissions: if who_should_answer_the_question_permissions { Permissions::Others } else { Permissions::WriterOnly } ,
                             answers: vec![], // TODO
                             answer_accepted,
@@ -475,9 +597,9 @@ pub struct EditQuestionCommand {
 }
 
 /// The structure posted to the bulletin board in response to an EditQuestionCommand.
+#[derive(Serialize,Deserialize,Debug,Clone)]
 pub struct EditQuestionCommandPostedToBulletinBoard {
     pub command : ClientSigned<EditQuestionCommand>,
-    /// TODO Do we want this? The bulletin board will keep a timestamp anyway.
     pub timestamp : Timestamp,
     /// This will be a link to the prior node in the database. This will be a duplicate of [self.command.parsed.version], but easier to access, and future proof against a change in design where version is not included.
     pub prior : LastQuestionUpdate,
@@ -488,8 +610,20 @@ impl EditQuestionCommand {
 
     /// Try to perform the edit.
     /// If success, return the new last edit.
-    pub async fn edit(_command:&ClientSigned<EditQuestionCommand>) -> Result<LastQuestionUpdate,QuestionError> {
-        todo!()
+    pub async fn edit(command:&ClientSigned<EditQuestionCommand>) -> Result<LastQuestionUpdate,QuestionError> {
+        let question_info = QuestionInfo::lookup(command.parsed.question_id).await?.ok_or_else(||QuestionError::QuestionDoesNotExist)?;
+        if question_info.version!=command.parsed.version { return Err(QuestionError::LastUpdateIsNotCurrent); }
+        let is_creator = question_info.defining.author == command.signed_message.user;
+        command.parsed.edits.check_legal(is_creator,&command.signed_message.user,Some(&question_info)).await?;
+        let timestamp = timestamp_now().map_err(internal_error)?;
+        let for_bb = EditQuestionCommandPostedToBulletinBoard {
+            command: command.clone(),
+            timestamp,
+            prior : command.parsed.version,
+        };
+        let version = LogInBulletinBoard::EditQuestion(for_bb).log_in_bulletin_board().await.map_err(bulletin_board_error)?;
+        command.parsed.edits.modify_database(command.parsed.question_id,version,Some(command.parsed.version),timestamp).await?;
+        Ok(version)
     }
 }
 

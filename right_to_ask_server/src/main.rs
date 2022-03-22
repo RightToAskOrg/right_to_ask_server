@@ -9,7 +9,7 @@ use merkle_tree_bulletin_board::hash_history::{FullProof, HashInfo};
 use right_to_ask_api::signing::{get_server_public_key_base64encoded, ServerSigned, get_server_public_key_raw_hex, get_server_public_key_raw_base64, ClientSigned};
 use actix_web::http::header::{ContentDisposition, DispositionType, DispositionParam};
 use actix_files::NamedFile;
-use right_to_ask_api::question::{NewQuestionCommand, QuestionID, QuestionInfo};
+use right_to_ask_api::question::{EditQuestionCommand, NewQuestionCommand, QuestionID, QuestionInfo};
 
 #[post("/new_registration")]
 async fn new_registration(command : Json<NewRegistration>) -> Json<Result<ServerSigned,String>> {
@@ -39,6 +39,18 @@ async fn new_question(command : Json<ClientSigned<NewQuestionCommand>>) -> Json<
         Json(signed)
     }
 }
+
+#[post("/edit_question")]
+async fn edit_question(command : Json<ClientSigned<EditQuestionCommand>>) -> Json<Result<ServerSigned,String>> {
+    if let Err(signing_error) = command.signed_message.check_signature().await {
+        Json(Err(signing_error.to_string()))
+    } else {
+        let res = EditQuestionCommand::edit(&command).await;
+        let signed = ServerSigned::sign_string(res);
+        Json(signed)
+    }
+}
+
 
 
 #[post("/request_email_validation")]
@@ -211,6 +223,7 @@ async fn main() -> anyhow::Result<()> {
             .service(request_email_validation)
             .service(email_proof)
             .service(new_question)
+            .service(edit_question)
             .service(get_user_list)
             .service(get_user)
             .service(get_question_list)

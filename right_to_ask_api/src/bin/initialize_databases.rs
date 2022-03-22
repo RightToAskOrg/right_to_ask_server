@@ -9,6 +9,8 @@ fn main() -> anyhow::Result<()> {
         println!("Bulletin board database initialized.");
         initialize_right_to_ask_database()?;
         println!("Right To Ask database initialized.");
+        std::fs::remove_dir_all("journal")?;
+        println!("Removed old journal.");
     } else {
         println!("Nothing done.")
     }

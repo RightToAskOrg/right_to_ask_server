@@ -1,21 +1,5 @@
 "use strict";
 
-function showUser(div,user) {
-    const a = add(div,"a");
-    a.innerText=user;
-    a.href = "get_user?uid="+encodeURIComponent(user);
-}
-function updateUserList() {
-    function success(data) {
-        console.log(data);
-        const div = document.getElementById("UserList");
-        removeAllChildElements(div);
-        if (data.Ok) for (const line of data.Ok) showUser(add(div,"div"),line);
-        else if (data.Err) div.innerText="Error : "+data.Err;
-    }
-    getWebJSON("get_user_list",success,failure);
-}
-
 function editUser() {
     function success(result) {
         console.log(result);
@@ -66,7 +50,7 @@ function setUser(userInfo) {
         document.getElementById("DisplayName").value=user.display_name;
         document.getElementById("State").value=user.state;
         document.getElementById("Electorates").value=getUserElectorates();
-    } else if (userInfo.Err) failure("Error : "+data.Err);
+    } else if (userInfo.Err) failure("Error : "+userInfo.Err);
 }
 
 function updateUser() {

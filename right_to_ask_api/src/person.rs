@@ -210,7 +210,7 @@ pub async fn get_count_of_all_users() -> mysql::Result<usize> {
     Ok(elements)
 }
 
-pub async fn get_user_by_id(uid:&str) -> mysql::Result<Option<UserInfo>> {
+pub async fn get_user_by_id(uid:&UserUID) -> mysql::Result<Option<UserInfo>> {
     let mut conn = get_rta_database_connection().await?;
     let electorates = conn.exec_map("SELECT Chamber,Electorate from ELECTORATES where UID=?",(uid,),|(chamber,location)|Electorate{ chamber, region: location })?;
     let badges = conn.exec_map("SELECT badge,what from BADGES where UID=?",(uid,),|(badge,name)|Badge{ badge, name })?;
@@ -226,7 +226,19 @@ pub async fn get_user_by_id(uid:&str) -> mysql::Result<Option<UserInfo>> {
     } else {Ok(None)}
 }
 
-pub async fn get_user_public_key_by_id(uid:&str) -> mysql::Result<Option<String>> {
+pub async fn is_user_mp_or_staffer(uid:&UserUID) -> mysql::Result<bool> {
+    let mut conn = get_rta_database_connection().await?;
+    let badges = conn.exec_map("SELECT badge,what from BADGES where UID=?",(uid,),|(badge,name)|Badge{ badge, name })?;
+    Ok(badges.iter().any(|b|b.badge==BadgeType::MP || b.badge==BadgeType::MPStaff))
+}
+
+/// see if a given uid is a valid user.
+pub fn user_exists(uid:&UserUID,conn:&mut impl Queryable) -> mysql::Result<bool> {
+    let count : usize = conn.exec_first("SELECT COUNT(UID) from USERS where UID=?",(uid,))?.unwrap();
+    Ok(count>0)
+}
+
+pub async fn get_user_public_key_by_id(uid:&UserUID) -> mysql::Result<Option<String>> {
     let mut conn = get_rta_database_connection().await?;
     conn.exec_first("SELECT PublicKey from USERS where UID=?",(uid,))
 }
