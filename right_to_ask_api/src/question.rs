@@ -324,14 +324,14 @@ impl QuestionNonDefiningFields {
             let extra : HashSet<_> = self.mp_who_should_ask_the_question.iter().filter(|m|!existing.contains(m)).collect();
             if existing.len()+extra.len() > MAX_MPS_WHO_SHOULD_ASK_THE_QUESTION { return Err(QuestionError::TooLongListOfPeopleAskingQuestion);}
             let mut conn = get_rta_database_connection().await.map_err(internal_error)?;
-            for e in existing { e.check_sane(&mut conn)? }
+            for e in extra { e.check_sane(&mut conn)? }
         }
         if !self.entity_who_should_answer_the_question.is_empty() {
             let existing = existing.iter().flat_map(|e|e.non_defining.entity_who_should_answer_the_question.iter()).collect::<HashSet<_>>();
             let extra : HashSet<_> = self.entity_who_should_answer_the_question.iter().filter(|m|!existing.contains(m)).collect();
             if existing.len()+extra.len() > MAX_MPS_WHO_SHOULD_ANSWER_THE_QUESTION { return Err(QuestionError::TooLongListOfPeopleAnsweringQuestion);}
             let mut conn = get_rta_database_connection().await.map_err(internal_error)?;
-            for e in existing { e.check_sane(&mut conn)? }
+            for e in extra { e.check_sane(&mut conn)? }
         }
         // TODO finish legal checks.
         Ok(())

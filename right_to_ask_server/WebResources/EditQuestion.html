@@ -7,6 +7,7 @@
     <script src="util.js"></script>
     <script src="common.js"></script>
     <script src="signing.js"></script>
+    <script src="PoliticianList.js"></script>
     <script src="EditQuestion.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tweetnacl/1.0.3/nacl-fast.min.js"></script>
     <title>Edit Question - Testing only</title>
@@ -25,7 +26,18 @@ Last Modified : <span id="LastModified"></span><br/>
 <label for="FollowUpTo">Follow up to question ID (or leave blank for none): </label><input type="text" id="FollowUpTo"/><br/>
 <input type="checkbox" id="PermissionsAsk"> <label for="PermissionsAsk">Only author can add questioner</label><br/>
 <input type="checkbox" id="PermissionsAnswer"> <label for="PermissionsAnswer">Only author can add answerer</label><br/>
-
+<h6>Who should ask the question</h6>
+Current list: <span id="CurrentAskList"></span><br/>
+<label for="AddUserAskList">Add comma separated users: </label><input type="text" id="AddUserAskList"/><br/>
+<label for="AddDomainAskList">Add comma separated domains: </label><input type="text" id="AddDomainAskList"/><br/>
+Add MP : <span id="AddMPAskList"></span><br/>
+<div id="PoliticianAskList"></div>
+<h6>Who should answer the question</h6>
+Current list: <span id="CurrentAnswerList"></span><br/>
+<label for="AddUserAnswerList">Add comma separated users: </label><input type="text" id="AddUserAnswerList"/><br/>
+<label for="AddDomainAnswerList">Add comma separated domains: </label><input type="text" id="AddDomainAnswerList"/><br/>
+Add MP : <span id="AddMPAnswerList"></span><br/>
+<div id="PoliticianAnswerList"></div>
 <h5> Who is doing the change</h5>
 
 <label for="UID">User editing question: </label><input type="text" id="UID"/><br/>
