@@ -34,3 +34,12 @@ text.TreeViewLeaf {
     dominant-baseline : middle;
     font-weight: bold;
 }
+
+blockquote {
+    background: lightgrey;
+    white-space: pre;
+}
+
+figcaption {
+    font-style: italic;
+}

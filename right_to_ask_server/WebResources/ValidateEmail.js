@@ -59,5 +59,10 @@ function VerifyCode() {
 window.onload = function () {
     document.getElementById("RequestEmail").onclick = RequestEmail;
     document.getElementById("VerifyCode").onclick = VerifyCode;
-    updateQuestionList();
+    getWebJSON("MPs.json",function (mpList) {
+        makePoliticianList("ChooseMP",mpList,function (mp) {
+            document.getElementById("Email").value=mp.email;
+            document.getElementById("BadgeName").value=mp.first_name+" "+mp.surname+" "+mp.email.slice(mp.email.indexOf("@"));
+        });
+    },failure);
 }

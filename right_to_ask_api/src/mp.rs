@@ -121,6 +121,12 @@ impl MPSpec {
     }
 
     pub fn contains(&self,mp_id:&MPId) -> bool {
-        self.mps.iter().any(|mp|mp.first_name==mp_id.first_name && mp.surname==mp_id.surname && mp.electorate==mp_id.electorate)
+        self.find(mp_id).is_some()
     }
+
+    pub fn find(&self, mp_id:&MPId) -> Option<&MP> {
+        self.mps.iter().find(|mp|mp.first_name==mp_id.first_name && mp.surname==mp_id.surname && mp.electorate==mp_id.electorate)
+    }
+
 }
+

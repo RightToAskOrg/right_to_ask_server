@@ -18,7 +18,7 @@ use mysql::TxOpts;
 use sha2::{Digest, Sha256};
 use crate::database::{get_rta_database_connection, LogInBulletinBoard};
 use crate::mp::{get_org_id_from_database, MPId, MPIndexInDatabaseTable, MPSpec, OrgIndexInDatabaseTable};
-use crate::person::{is_user_mp_or_staffer, user_exists, UserUID};
+use crate::person::{user_exists, UserUID};
 use crate::signing::ClientSigned;
 
 /// A question ID is a hash of the question text, the question writer, and the upload timestamp.
@@ -39,7 +39,8 @@ pub enum QuestionError {
     QuestionTooLong,
     YouJustAskedThatQuestion, // within the last 24 hours
     AnswerTooLong,
-    OnlyMPCanAnswerQuestion,
+    AnswerContainsUndesiredFields, // the answer structure contains timestamp and answered_by fields that are filled in by the server.
+    UserDoesNotHaveCorrectMPBadge,
     BackgroundTooLong,
     SameQuestionSubmittedRecently,
     OnlyAuthorCanChangeBackground,
@@ -279,14 +280,50 @@ pub struct QuestionNonDefiningFields {
 
 #[derive(Serialize,Deserialize,Debug,Clone)]
 pub struct QuestionAnswer {
-    /// must be a MP
-    answered_by : UserUID,
+    /// must be a MP. Set by server to whoever signed the message - client should not set this when sending to server.
+    #[serde(skip_serializing_if = "Option::is_none",default)]
+    answered_by : Option<UserUID>,
     mp : MPId,
     answer : String,
     /// set by server - client should not set this when sending to server.
+    #[serde(skip_serializing_if = "Option::is_none",default)]
     timestamp : Option<Timestamp>,
 }
 
+impl QuestionAnswer {
+    /// Get the answers to a question.
+    fn get_for_question(conn:&mut impl Queryable,question:QuestionID) -> mysql::Result<Vec<QuestionAnswer>> {
+        let entries : Vec<(UserUID,MPIndexInDatabaseTable,Timestamp,String)> = conn.exec("SELECT author,mp,timestamp,answer from Answer where QuestionId=? order by timestamp",(&question.0,))?;
+        let mut res : Vec<QuestionAnswer> = vec![];
+        for (answered_by,mp,timestamp,answer) in entries {
+            if let Some(mp_id) = MPId::read_from_database(conn,mp)? {
+                res.push(QuestionAnswer{answered_by:Some(answered_by),mp:mp_id,answer,timestamp: Some(timestamp) })
+            } else {
+                eprintln!("Missimg mp {} in question {} answer",mp,question);
+            }
+        }
+        Ok(res)
+    }
+    /// Add a given answer to the database.
+    fn add_for_question(&self,conn:&mut impl Queryable,question:QuestionID,timestamp:Timestamp,uid:&UserUID) -> mysql::Result<()> {
+        let mp = self.mp.get_id_from_database(conn)?;
+        conn.exec_drop("insert into Answer (QuestionId,author,mp,timestamp,answer) values (?,?,?,?,?)",(&question.0,uid,mp,timestamp,&self.answer))?;
+        Ok(())
+    }
+
+    fn check_legal(&self,conn:&mut impl Queryable,uid:&UserUID) -> Result<(),QuestionError> {
+        if self.answer.len()>MAX_ANSWER_LENGTH { return Err(QuestionError::AnswerTooLong); }
+        if self.answered_by.is_some() || self.timestamp.is_some() { return Err(QuestionError::AnswerContainsUndesiredFields); }
+        let mps = MPSpec::get();
+        let mps = (*mps).as_ref().map_err(internal_error)?;
+        if let Some(mp) = mps.find(&self.mp) {
+            let badges : usize = conn.exec_first("SELECT COUNT(badge) from BADGES where UID=? and what=? and (badge='MP' || badge='MPStaff')",(uid,mp.badge_name())).map_err(internal_error)?.ok_or_else(||QuestionError::InternalError)?;
+            if badges==0 { return Err(QuestionError::UserDoesNotHaveCorrectMPBadge); }
+        } else  { return Err(QuestionError::InvalidMP); }
+        Ok(())
+    }
+
+}
 ///  domain must be aph.gov.au, parliament.vic.gov.au, etc. (preloaded permit-list - note that url sanitation is nontrivial).
 #[derive(Serialize,Deserialize,Debug,Clone)]
 pub struct HansardLink {
@@ -295,15 +332,19 @@ pub struct HansardLink {
 
 
 impl QuestionNonDefiningFields {
+    /// Check that all the fields are legal to modify.
+    // A database connection may be retrieved many times in a rather wasteful manner.
     pub async fn check_legal(&self,is_creator:bool,user:&UserUID,existing:Option<&QuestionInfo>) -> Result<(),QuestionError> {
         if let Some(background) = &self.background {
             if background.len()>MAX_BACKGROUND_LENGTH { return Err(QuestionError::BackgroundTooLong); }
             if !is_creator { return Err(QuestionError::OnlyAuthorCanChangeBackground); }
             if !existing.and_then(|info|info.non_defining.background.as_ref()).map(|e|background.starts_with(e)).unwrap_or(true) { return Err(QuestionError::CanOnlyExtendBackground); }
         }
-        if self.answers.iter().any(|a|a.answer.len()>MAX_ANSWER_LENGTH)  { return Err(QuestionError::AnswerTooLong); }
-        if self.answers.iter().any(|a|a.answer.len()>MAX_ANSWER_LENGTH)  { return Err(QuestionError::AnswerTooLong); }
-        if (!self.answers.is_empty()) && !is_user_mp_or_staffer(user).await.map_err(internal_error)?  { return Err(QuestionError::OnlyMPCanAnswerQuestion); }
+        for a in &self.answers {
+            let mut conn = get_rta_database_connection().await.map_err(internal_error)?;
+            a.check_legal(&mut conn,user)?;
+        }
+//        if (!self.answers.is_empty()) && !is_user_mp_or_staffer(user).await.map_err(internal_error)?  { return Err(QuestionError::OnlyMPCanAnswerQuestion); }
         if let Some(follow_up_to) = self.is_followup_to {
             // check it is a valid question
             let mut conn = get_rta_database_connection().await.map_err(internal_error)?;
@@ -333,12 +374,12 @@ impl QuestionNonDefiningFields {
             let mut conn = get_rta_database_connection().await.map_err(internal_error)?;
             for e in extra { e.check_sane(&mut conn)? }
         }
-        // TODO finish legal checks.
+        // TODO check answer_accepted and hansard_link.
         Ok(())
     }
 
     /// Add a simple question to the database, without any extra information yet.
-    async fn modify_database(&self,question_id:QuestionID,new_version:LastQuestionUpdate,expecting_version:Option<LastQuestionUpdate>,timestamp:Timestamp) -> Result<(),QuestionError> {
+    async fn modify_database(&self,question_id:QuestionID,new_version:LastQuestionUpdate,expecting_version:Option<LastQuestionUpdate>,timestamp:Timestamp,uid:&UserUID) -> Result<(),QuestionError> {
         println!("modify_database with question non-defining fields {:?}",self);
         let mut conn = get_rta_database_connection().await.map_err(internal_error)?;
         let mut transaction = conn.start_transaction(TxOpts::default()).map_err(internal_error)?;
@@ -372,7 +413,10 @@ impl QuestionNonDefiningFields {
         if let Some(follow_up_to) = self.is_followup_to {
             transaction.exec_drop("update QUESTIONS set FollowUpTo=? where QuestionID=?", (follow_up_to.0,question_id.0)).map_err(internal_error)?;
         }
-        // TODO insert stuff.
+        for a in &self.answers {
+            a.add_for_question(&mut transaction,question_id,timestamp,uid).map_err(internal_error)?;
+        }
+        // TODO insert answer_accepted and hansard_link.
         transaction.commit().map_err(internal_error)?;
         Ok(())
     }
@@ -468,7 +512,7 @@ impl NewQuestionCommand {
             question_id
         };
         let version = LogInBulletinBoard::NewQuestion(for_bb).log_in_bulletin_board().await.map_err(bulletin_board_error)?;
-        question.parsed.non_defining_fields.modify_database(question_id,version,None,timestamp).await?;
+        question.parsed.non_defining_fields.modify_database(question_id,version,None,timestamp,&question.signed_message.user).await?;
         Ok(NewQuestionCommandResponse{ question_id, version })
     }
 }
@@ -533,7 +577,7 @@ impl QuestionInfo {
                             who_should_ask_the_question_permissions: if who_should_ask_the_question_permissions { Permissions::Others } else { Permissions::WriterOnly } ,
                             entity_who_should_answer_the_question: PersonID::get_for_question(&mut conn,'A',question_id).map_err(internal_error)?,
                             who_should_answer_the_question_permissions: if who_should_answer_the_question_permissions { Permissions::Others } else { Permissions::WriterOnly } ,
-                            answers: vec![], // TODO
+                            answers: QuestionAnswer::get_for_question(&mut conn,question_id).map_err(internal_error)?,
                             answer_accepted,
                             hansard_link: vec![], // TODO
                             is_followup_to : opt_hash_from_value(is_followup_to),
@@ -622,7 +666,7 @@ impl EditQuestionCommand {
             prior : command.parsed.version,
         };
         let version = LogInBulletinBoard::EditQuestion(for_bb).log_in_bulletin_board().await.map_err(bulletin_board_error)?;
-        command.parsed.edits.modify_database(command.parsed.question_id,version,Some(command.parsed.version),timestamp).await?;
+        command.parsed.edits.modify_database(command.parsed.question_id,version,Some(command.parsed.version),timestamp,&command.signed_message.user).await?;
         Ok(version)
     }
 }

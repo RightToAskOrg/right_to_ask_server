@@ -7,6 +7,7 @@
     <script src="util.js"></script>
     <script src="common.js"></script>
     <script src="signing.js"></script>
+    <script src="PoliticianList.js"></script>
     <script src="ValidateEmail.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tweetnacl/1.0.3/nacl-fast.min.js"></script>
     <title>Validate Email - Testing only</title>
@@ -23,6 +24,7 @@ Note: This is the private key for the default public key on the AddUser page. Do
 
 <label for="Email">Email: </label><input type="text" id="Email"/><br/>
 <label for="BadgeName">Badge name: </label><input type="text" id="BadgeName"/> for an MP this is <span class="program">FirstName Surname @emaildomain</span>, for a domain this is the domain starting with the @ character.<br/>
+<div id="ChooseMP"></div>
 <label for="Purpose">Purpose: </label><select id="Purpose">
     <option value="MP">As MP</option>
     <option value="MPStaffer">As MP staff</option>
