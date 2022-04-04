@@ -15,9 +15,7 @@
 
 
 
-use tempfile::NamedTempFile;
 use std::path::{PathBuf, Path};
-use std::io::Write;
 use std::fs::File;
 use crate::mp::{MP, MPSpec};
 use crate::regions::{Electorate, Chamber, State, RegionContainingOtherRegions};
@@ -30,20 +28,9 @@ use itertools::Itertools;
 use crate::parse_pdf_util::{parse_pdf_to_strings_with_same_font, extract_string};
 use regex::Regex;
 use calamine::{open_workbook, Xls, Reader, Xlsx};
+use crate::parse_util::download_to_file;
 
-/// Temporary file directory. Should be in same filesystem as MP_SOURCE.
-const TEMP_DIR : &'static str = "data/temp";
 pub const MP_SOURCE : &'static str = "data/MP_source";
-/// Download from a URL to a temporary file.
-async fn download_to_file(url:&str) -> anyhow::Result<NamedTempFile> {
-    println!("Downloading {}",url);
-    let mut file = NamedTempFile::new_in(TEMP_DIR)?;
-    let response = reqwest::get(url).await?;
-    let content = response.bytes().await?;
-    file.write_all(&content)?;
-    file.flush()?;
-    Ok(file)
-}
 
 fn parse_australian_senate(file : File) -> anyhow::Result<Vec<MP>> {
     parse_csv(file, Chamber::Australian_Senate, "Surname", &["Preferred Name", "First Name"], None, Some("State"), &["Parliamentary Titles"],"Political Party")
@@ -512,7 +499,6 @@ fn extract_electorates(mps : &[MP]) -> anyhow::Result<HashSet<String>> {
 
 /// Download, check, and if valid replace the downloaded files with MP lists. First of the two stages for generating MPs.json
 pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
-    std::fs::create_dir_all(TEMP_DIR)?;
     std::fs::create_dir_all(MP_SOURCE)?;
     let dir = PathBuf::from_str(MP_SOURCE)?;
 
