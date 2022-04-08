@@ -10,6 +10,7 @@ pub mod question;
 mod time_limited_hashmap;
 pub mod parse_upcoming_hearings;
 mod parse_util;
+pub mod committee;
 
 #[cfg(test)]
 mod tests {

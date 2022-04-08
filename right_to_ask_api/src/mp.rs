@@ -17,7 +17,8 @@ use crate::question::OrgID;
 
 /// Information about a MP (or other human elected representative, e.g. senator).
 /// Not all fields are known perfectly for each person.
-#[derive(Serialize,Deserialize)]
+/// This is Information about current MPs, rather than a definition of an MP at some point in time.
+#[derive(Serialize,Deserialize,Debug,Clone)]
 pub struct MP {
     pub first_name : String,
     pub surname : String,
@@ -42,6 +43,7 @@ impl Display for MP {
 }
 
 /// Information identifying an MP.
+/// This differs from MP by being a definition of a particular MP at a particular time.
 #[derive(Serialize,Deserialize,Clone,Debug,Eq,PartialEq,Hash)]
 pub struct MPId {
     pub first_name : String,

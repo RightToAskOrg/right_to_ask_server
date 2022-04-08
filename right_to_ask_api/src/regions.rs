@@ -141,6 +141,88 @@ impl FromValue for Chamber {
 }
 
 
+/// Who is responsible? Union of a state or "Federal" or a chamber.
+#[derive(Debug,Clone,Copy,Serialize,Deserialize,Eq,PartialEq,Hash)]
+#[allow(non_camel_case_types)]
+pub enum Jurisdiction {
+	ACT,NSW,NT,QLD,SA,TAS,VIC,WA,
+	Federal,
+	ACT_Legislative_Assembly,
+	Australian_House_Of_Representatives,
+	Australian_Senate,
+	NSW_Legislative_Assembly,
+	NSW_Legislative_Council,
+	NT_Legislative_Assembly,
+	Qld_Legislative_Assembly,
+	SA_House_Of_Assembly,
+	SA_Legislative_Council,
+	Vic_Legislative_Assembly,
+	Vic_Legislative_Council,
+	Tas_House_Of_Assembly,
+	Tas_Legislative_Council,
+	WA_Legislative_Assembly,
+	WA_Legislative_Council
+}
+
+// Provide Display & to_string() for Chamber enum
+impl fmt::Display for Jurisdiction {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "{:?}", self)
+	}
+}
+
+impl From<Jurisdiction> for Value {
+	fn from(s: Jurisdiction) -> Self {
+		Value::Bytes(s.to_string().into_bytes())
+	}
+}
+
+impl ConvIr<Jurisdiction> for Jurisdiction {
+	fn new(v: Value) -> Result<Self, FromValueError> {
+		match v { // May have to deal with int and uint if it is an enumeration on the server.
+			Value::Bytes(bytes) => match bytes.as_slice() {
+				b"ACT_Legislative_Assembly" => Ok(Jurisdiction::ACT_Legislative_Assembly),
+				b"Australian_House_Of_Representatives" => Ok(Jurisdiction::Australian_House_Of_Representatives),
+				b"Australian_Senate" => Ok(Jurisdiction::Australian_Senate),
+				b"NSW_Legislative_Assembly" => Ok(Jurisdiction::NSW_Legislative_Assembly),
+				b"NSW_Legislative_Council" => Ok(Jurisdiction::NSW_Legislative_Council),
+				b"NT_Legislative_Assembly" => Ok(Jurisdiction::NT_Legislative_Assembly),
+				b"Qld_Legislative_Assembly" => Ok(Jurisdiction::Qld_Legislative_Assembly),
+				b"SA_House_Of_Assembly" => Ok(Jurisdiction::SA_House_Of_Assembly),
+				b"SA_Legislative_Council" => Ok(Jurisdiction::SA_Legislative_Council),
+				b"Vic_Legislative_Assembly" => Ok(Jurisdiction::Vic_Legislative_Assembly),
+				b"Vic_Legislative_Council" => Ok(Jurisdiction::Vic_Legislative_Council),
+				b"Tas_House_Of_Assembly" => Ok(Jurisdiction::Tas_House_Of_Assembly),
+				b"Tas_Legislative_Council" => Ok(Jurisdiction::Tas_Legislative_Council),
+				b"WA_Legislative_Assembly" => Ok(Jurisdiction::WA_Legislative_Assembly),
+				b"WA_Legislative_Council" => Ok(Jurisdiction::WA_Legislative_Council),
+				b"ACT" => Ok(Jurisdiction::ACT),
+				b"NSW" => Ok(Jurisdiction::NSW),
+				b"NT" => Ok(Jurisdiction::NT),
+				b"QLD" => Ok(Jurisdiction::QLD),
+				b"SA" => Ok(Jurisdiction::SA),
+				b"TAS" => Ok(Jurisdiction::TAS),
+				b"VIC" => Ok(Jurisdiction::VIC),
+				b"WA" => Ok(Jurisdiction::WA),
+				b"Federal" => Ok(Jurisdiction::Federal),
+				_ => {
+					println!("Found unexpected jurisduction {:?} in region.rs/ConvIr<Jurisdiction>",String::from_utf8_lossy(&bytes));
+					Err(FromValueError(Value::Bytes(bytes)))
+				},
+			},
+			v => Err(FromValueError(v)),
+		}
+	}
+
+	fn commit(self) -> Self { self }
+	fn rollback(self) -> Value { self.into() }
+}
+
+impl FromValue for Jurisdiction {
+	type Intermediate = Self;
+}
+
+
 /// A generalized electorate, being a chamber, and the particular region for that chamber, unless the chamber has no regions.
 #[derive(Debug,Clone,Serialize,Deserialize,Eq,PartialEq,Hash)]
 pub struct Electorate {
