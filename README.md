@@ -86,7 +86,7 @@ between runs. This will reinitialize (i.e. wipe) the database contents.
 
 ## Copyright
 
-This program is Copyright 2021 Thinking Cybersecurity Pty. Ltd. 
+This program is Copyright 2022 Democracy Developers Ltd. 
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU Affero General Public License as published by
