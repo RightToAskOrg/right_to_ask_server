@@ -9,6 +9,14 @@ cargo build --release
 
 This will create several binary programs in the `target/release` directory.
 
+## Documentation
+
+Optionally, if you want to read the API and other documentation, compile it with
+```
+cargo doc
+```
+The docs are then available in `target/doc`. For example, `/target/doc/right_to_ask_api/question` describes the question API data structures.
+
 ## Databases
 
 The server uses MySQL/MariaDB for the database. Two databases are needed, one for the
