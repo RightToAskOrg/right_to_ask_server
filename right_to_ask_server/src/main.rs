@@ -208,7 +208,7 @@ async fn mps() -> std::io::Result<NamedFile> {
 #[actix_rt::main]
 async fn main() -> anyhow::Result<()> {
     // check whether everything is working before starting the web server. Don't want to find out in the middle of a transaction.
-    println!("Server public key {}",get_server_public_key_raw_hex());
+    println!("Server public key {}",get_server_public_key_raw_base64());
     println!("Bulletin board latest published root {:?}",get_bulletin_board().await.get_most_recent_published_root()?);
     println!("{} users in the database",get_count_of_all_users().await?);
     println!("Running demo webserver on http://localhost:8099 stop with control C.");
