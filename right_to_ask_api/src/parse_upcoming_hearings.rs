@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 use std::fs::File;
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use anyhow::{anyhow, Context};
@@ -99,14 +100,14 @@ fn parse_simple_a_committee(jurisdiction:Jurisdiction,selector:&str,html:&Html,b
         if a.value().name()=="a" {
             let url = rel_url_from_a(base_url,&a)?;
             let committee = CommitteeInfo{ jurisdiction, name,url, committee_type: committee_type.clone()}; // TODO these URLs are often a 304 link to a prettier link.
-            println!("{:?}",committee);
+            // println!("{:?}",committee);
             res.push(committee);
         } else if let Some(canonicalizer) = committee_type_canonicalizer {
             // is a committee type
             committee_type = canonicalizer.get(&name).cloned();
 
         } else {
-            panic!("Found unexpected type {}",name);
+            return Err(anyhow!("Found unexpected type {} in parse_simple_a_committee",name));
         }
     }
     Ok(res)
@@ -124,11 +125,55 @@ fn parse_federal_committees_html_file(path:&Path,base_url:&str) -> anyhow::Resul
     Ok(vec![senate,house,joint].into_iter().flatten().collect())
 }
 
-fn parse_act_committees_html_file(path:&Path,base_url:&str) -> anyhow::Result<Vec<CommitteeInfo>> { // TODO remove dissolved committees?
+/// parse json records like
+/// ```json
+/// [
+///   {"committeeId":1,"name":"Parliamentary Procedures and Practices","typeCode":"SELECT","typeName":"Select Committees","houseCode":"HA","houseName":"House of Assembly","parliamentId":49},
+///   {"committeeId":4,"name":"Joint Parliamentary Services Committee","typeCode":"ADMIN","typeName":"Administrative Committees","houseCode":"JO","houseName":"Joint","parliamentId":49},
+///   {"committeeId":13,"name":"Internet and Interactive Home Gambling and Gambling by Other Means of Telecommunication Committee","typeCode":"SELECT","typeName":"Select Committees","houseCode":"LC","houseName":"Legislative Council","parliamentId":49}
+/// ]
+/// ```
+///
+/// Only use the records with the largest value of parliamentId
+fn parse_sa_committees_json_file(path:&Path,_base_url:&str) -> anyhow::Result<Vec<CommitteeInfo>> {
+    let file = File::open(path)?;
+    let reader = BufReader::new(file);
+    let records : Vec<serde_json::Value> = serde_json::from_reader(reader)?;
+    let parliament_id = |r:&serde_json::Value| { r["parliamentId"].as_i64().unwrap_or(0)};
+    let max_parliament_id = records.iter().map(parliament_id).max().unwrap_or(0);
+    let mut res : Vec<CommitteeInfo> = vec![];
+    for record in records {
+        if parliament_id(&record)==max_parliament_id { // a current committee
+            if let Some(name) = record["name"].as_str() {
+                let committee_type = record["typeCode"].as_str().map(|s|s.to_string());
+                if let Some(house) = record["houseCode"].as_str() {
+                    let jurisdiction = match house {
+                        "HA" => Jurisdiction::SA_House_Of_Assembly,
+                        "LC" => Jurisdiction::SA_Legislative_Council,
+                        "JO" => Jurisdiction::SA,
+                        _ => return Err(anyhow!("Unknown houseCode value {}",house))
+                    };
+                    res.push(CommitteeInfo{
+                        jurisdiction,
+                        name: name.to_string(),
+                        url: None,
+                        committee_type
+                    });
+                }
+            }
+        }
+    }
+    Ok(res)
+}
+
+
+fn parse_act_committees_html_file(path:&Path,base_url:&str) -> anyhow::Result<Vec<CommitteeInfo>> {
     let html = scraper::Html::parse_document(&std::fs::read_to_string(path)?);
     let mut mapper = HashMap::new();
     mapper.insert("Dissolved committees".to_string(),"dissolved".to_string());
-    parse_simple_a_committee(Jurisdiction::ACT,"div#main div.spf-article-title a , div#main hr~h2",&html,base_url,Some(&mapper))
+    let mut res = parse_simple_a_committee(Jurisdiction::ACT,"div#main div.spf-article-title a , div#main hr~h2",&html,base_url,Some(&mapper))?;
+    res.retain(|c|c.committee_type!=Some("dissolved".to_string())); // I am assuming we remove dissolved committees. Remove this line if we want to keep them.
+    Ok(res)
 }
 
 fn parse_nsw_committees_html_file(path:&Path,base_url:&str) -> anyhow::Result<Vec<CommitteeInfo>> {  // TODO check that we only want ones without an end date.
@@ -151,7 +196,7 @@ fn parse_nsw_committees_html_file(path:&Path,base_url:&str) -> anyhow::Result<Ve
             None => return Err(anyhow!("Missing house")),
         };
         let committee_type = tds[2].text().next().map(|s|s.trim().to_string()); // Select or Standing or Statutory
-        let start_date = tds[4].text().next().unwrap_or("").trim().to_string();
+        //let start_date = tds[4].text().next().unwrap_or("").trim().to_string();
         let end_date = tds[5].text().next().unwrap_or("").trim().to_string();
         if end_date.is_empty() {
             let committee = CommitteeInfo{ jurisdiction, name,url,committee_type};
@@ -231,7 +276,7 @@ const NT_COMMITTEE_FILE : DownloadableFile<'static> = DownloadableFile{ url: "ht
 const QLD_COMMITTEE_FILE : DownloadableFile<'static> = DownloadableFile{ url: "https://www.parliament.qld.gov.au/Work-of-Committees/Committees", filename: "QLD_Committees.html"};
 // The SA html file https://www.parliament.sa.gov.au/en/Committees/Committees-Detail is computed based on a json file which contains the parliamentId in it.
 // Will need to change the 54, alternatively leave the whole filter off and just get the ones with the largest ids.
-const SA_COMMITTEE_FILE : DownloadableFile<'static> = DownloadableFile{ url: "https://committees-api.parliament.sa.gov.au/api/Committees?$filter=parliamentId%20eq%2054", filename: "SA_Committees.json"}; // TODO (also TAS)
+const SA_COMMITTEE_FILE : DownloadableFile<'static> = DownloadableFile{ url: "https://committees-api.parliament.sa.gov.au/api/Committees", filename: "SA_Committees.json"}; // removed the filter ?$filter=parliamentId%20eq%2054 from the end of the URL.
 const TAS_LC_COMMITTEE_FILE : DownloadableFile<'static> = DownloadableFile{ url: "https://www.parliament.tas.gov.au/ctee/council/LCCommittees.html", filename: "TAS_LC_Committees.html"};
 const TAS_HA_COMMITTEE_FILE : DownloadableFile<'static> = DownloadableFile{ url: "https://www.parliament.tas.gov.au/ctee/assembly/HACommittees.html", filename: "TAS_HA_Committees.html"};
 const TAS_JOINT_COMMITTEE_FILE : DownloadableFile<'static> = DownloadableFile{ url: "https://www.parliament.tas.gov.au/ctee/joint/JointCommittees.html", filename: "TAS_Joint_Committees.html"};
@@ -261,6 +306,8 @@ pub async fn update_hearings_list_of_files() -> anyhow::Result<()> {
     std::fs::create_dir_all(HEARINGS_SOURCE)?;
     let dir = PathBuf::from_str(HEARINGS_SOURCE)?;
 
+    SA_COMMITTEE_FILE.download_and_check(&dir,parse_sa_committees_json_file).await?;
+
 
     ACT_COMMITTEE_FILE.download_and_check(&dir,parse_act_committees_html_file).await?;
     NSW_COMMITTEE_FILE.download_and_check(&dir,parse_nsw_committees_html_file).await?;
@@ -280,6 +327,7 @@ pub async fn update_hearings_list_of_files() -> anyhow::Result<()> {
 pub async fn create_hearings_list()  -> anyhow::Result<()> {
     let dir = PathBuf::from_str(HEARINGS_SOURCE)?;
     let mut committees : Vec<CommitteeInfo> = vec![];
+    SA_COMMITTEE_FILE.accumulate(&mut committees,&dir,parse_sa_committees_json_file).await?;
     ACT_COMMITTEE_FILE.accumulate(&mut committees,&dir,parse_act_committees_html_file).await?;
     NSW_COMMITTEE_FILE.accumulate(&mut committees,&dir,parse_nsw_committees_html_file).await?;
     NT_COMMITTEE_FILE.accumulate(&mut committees,&dir,parse_nt_committees_html_file).await?;

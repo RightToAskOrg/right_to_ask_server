@@ -15,6 +15,7 @@ pub struct CommitteeId {
 pub struct CommitteeInfo {
     pub jurisdiction : Jurisdiction,
     pub name : String,
+    #[serde(default,skip_serializing_if = "Option::is_none")]
     pub url : Option<String>,
     #[serde(default,skip_serializing_if = "Option::is_none")]
     pub committee_type : Option<String>,
