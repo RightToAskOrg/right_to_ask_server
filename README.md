@@ -61,9 +61,18 @@ as described in [config.md]
 
 Initialize the two databases via the command `./target/release/initialize_databases`. 
 
-### Loading the list of MPs
+### Loading the list of MPs, Committees, and Hearings.
 
-Download files and make `data/MP_source/MPs.json` by running `./target/release/update_mp_list_of_files`. This may be done by a server command later.
+You need three files to serve which need regular updating:
+* `data/MP_source/MPs.json` listing information about current MPs.
+* `data/MP_source/committees.json` listing information about current committees.
+* `data/MP_source/hearings.json` listing information about current hearings.
+
+The first of these can be created by running `./target/release/update_mp_list_of_files`. The other two by
+running `./target/release/update_upcoming_hearings`. Note that these will download new data from websites,
+and may fail if their format or URLs has changed.
+
+Alternatively, copy these files in from somewhere else.
 
 ### Running the server
 
