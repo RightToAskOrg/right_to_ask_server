@@ -18,7 +18,7 @@ use crate::regions::Jurisdiction;
 pub const HEARINGS_SOURCE : &'static str = "data/upcoming_hearings";
 
 #[derive(Serialize,Deserialize,Debug)]
-struct UpcomingHearing {
+pub struct UpcomingHearing {
     date_short : String,
     date_long : String,
     inquiry : String,

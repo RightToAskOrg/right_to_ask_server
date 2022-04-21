@@ -1,3 +1,4 @@
+use std::ops::Deref;
 use actix_web::{HttpServer, middleware, web};
 use actix_web::{get, post};
 use std::path::PathBuf;
@@ -7,8 +8,7 @@ use merkle_tree_bulletin_board::hash::HashValue;
 use right_to_ask_api::database::get_bulletin_board;
 use merkle_tree_bulletin_board::hash_history::{FullProof, HashInfo};
 use right_to_ask_api::signing::{get_server_public_key_base64encoded, ServerSigned, get_server_public_key_raw_hex, get_server_public_key_raw_base64, ClientSigned};
-use actix_web::http::header::{ContentDisposition, DispositionType, DispositionParam};
-use actix_files::NamedFile;
+use right_to_ask_api::common_file::{COMMITTEES, HEARINGS, MPS};
 use right_to_ask_api::question::{EditQuestionCommand, NewQuestionCommand, QuestionID, QuestionInfo};
 
 #[post("/new_registration")]
@@ -192,7 +192,7 @@ fn find_web_resources() -> PathBuf {
     }
     panic!("Could not find WebResources. Please run in a directory containing it.")
 }
-
+/*
 #[get("/MPs.json")]
 async fn mps() -> std::io::Result<NamedFile> {
     let file = NamedFile::open("data/MP_source/MPs.json")?;
@@ -202,10 +202,63 @@ async fn mps() -> std::io::Result<NamedFile> {
             disposition: DispositionType::Attachment,
             parameters: vec![DispositionParam::Filename("MPs.json".to_string())],
         }))
+}*/
+/*
+struct BoxedVec(Arc<Vec<u8>>);
+
+impl Responder for BoxedVec {
+    type Body = Arc<Vec<u8>>;
+
+    fn respond_to(self, _req: &HttpRequest) -> HttpResponse<Self::Body> {
+        let res: Response<_> = self.into();
+        res.into()
+    }
+}
+*/
+#[get("/MPs.json")]
+async fn mps() -> Result<Vec<u8>,Box<dyn std::error::Error + 'static>> {
+    let data =MPS.get_data()?;
+    Ok(data.deref().clone()) // UGH!!! Why do I have to clone this?????
+}
+
+#[get("/committees.json")]
+async fn committees() -> Result<Vec<u8>,Box<dyn std::error::Error + 'static>> {
+    let data =COMMITTEES.get_data()?;
+    Ok(data.deref().clone()) // UGH!!! Why do I have to clone this?????
+}
+
+#[get("/hearings.json")]
+async fn hearings() -> Result<Vec<u8>,Box<dyn std::error::Error + 'static>> {
+    let data =HEARINGS.get_data()?;
+    Ok(data.deref().clone()) // UGH!!! Why do I have to clone this?????
+}
+
+/// Information that the client should get at the very start to see if the client is too old, and
+/// whether lists should be downloaded.
+#[derive(serde::Serialize)]
+struct Info {
+    /// This should be increased each time there is a change API that will break prior clients.
+    api_level : usize,
+    /// SHA2 hash of the MPs.json file
+    hash_mps : HashValue,
+    /// SHA2 hash of the committees.json file
+    hash_committees : HashValue,
+    /// SHA2 hash of the hearings.json file
+    hash_hearings : HashValue,
+}
+#[get("/info.json")]
+async fn info() -> Result<Json<Info>,Box<dyn std::error::Error + 'static>> {
+    Ok(Json(Info{
+        api_level: 0, // This should be increased each time there is a change API that will break prior clients.
+        hash_mps: MPS.get_hash()?,
+        hash_committees: COMMITTEES.get_hash()?,
+        hash_hearings: HEARINGS.get_hash()?,
+    }))
 }
 
 
-#[actix_rt::main]
+
+#[actix_web::main]
 async fn main() -> anyhow::Result<()> {
     // check whether everything is working before starting the web server. Don't want to find out in the middle of a transaction.
     println!("Server public key {}",get_server_public_key_raw_base64());
@@ -236,6 +289,9 @@ async fn main() -> anyhow::Result<()> {
             .service(get_proof_chain)
             .service(get_all_published_roots)
             .service(mps)
+            .service(committees)
+            .service(hearings)
+            .service(info)
             .service(actix_files::Files::new("/journal/", "journal").use_last_modified(true).use_etag(true).show_files_listing())
             .service(actix_files::Files::new("/", find_web_resources()).use_last_modified(true).use_etag(true).index_file("index.html"))
     })

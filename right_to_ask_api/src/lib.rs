@@ -11,6 +11,7 @@ mod time_limited_hashmap;
 pub mod parse_upcoming_hearings;
 mod parse_util;
 pub mod committee;
+pub mod common_file;
 
 #[cfg(test)]
 mod tests {
