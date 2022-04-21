@@ -6,13 +6,9 @@ use crate::regions::{Chamber, Electorate, RegionContainingOtherRegions};
 pub use crate::parse_mp_lists::{update_mp_list_of_files,create_mp_list};
 use serde::{Serialize,Deserialize};
 use std::fmt::{Display, Formatter};
-use std::fs::File;
-use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::Arc;
 use mysql::prelude::Queryable;
-use once_cell::sync::OnceCell;
-use crate::parse_mp_lists::MP_SOURCE;
+use crate::common_file::MPS;
 use crate::question::OrgID;
 
 /// Information about a MP (or other human elected representative, e.g. senator).
@@ -105,16 +101,10 @@ pub struct MPSpec {
 }
 
 impl MPSpec {
-    fn read_from_file() -> anyhow::Result<MPSpec> {
-        let dir = PathBuf::from_str(MP_SOURCE)?;
-        let source = File::open(dir.join("MPs.json"))?;
-        Ok(serde_json::from_reader(source)?)
-    }
 
     /// Get the current list of MPs. Cached.
-    pub fn get() -> Arc<anyhow::Result<MPSpec>> {
-        static INSTANCE: OnceCell<Arc<anyhow::Result<MPSpec>>> = OnceCell::new();
-        INSTANCE.get_or_init(|| Arc::new(MPSpec::read_from_file())).clone()
+    pub fn get() -> anyhow::Result<Arc<MPSpec>> {
+        MPS.get_interpreted()
     }
 
     /// find the MP with a given email.

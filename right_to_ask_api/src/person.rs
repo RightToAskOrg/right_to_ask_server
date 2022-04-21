@@ -321,8 +321,7 @@ impl RequestEmailValidation {
     pub fn get_badge(sig : &ClientSigned<RequestEmailValidation,EmailAddress>) -> Result<Badge,EmailValidationError> {
         match &sig.parsed.why {
             EmailValidationReason::AsMP(principal) => {
-                let mps = MPSpec::get();
-                let mps = (*mps).as_ref().map_err(internal_error_email)?;
+                let mps = MPSpec::get().map_err(internal_error_email)?;
                 let mp = mps.find_by_email(&sig.signed_message.unsigned.email).ok_or(EmailValidationError::MPEmailNotKnown)?;
                 if mp.badge_name()!=sig.parsed.name { return Err(EmailValidationError::BadgeNameDoesNotMatchEmailAddress)}
                 Ok(Badge{
@@ -342,8 +341,7 @@ impl RequestEmailValidation {
                 Err(EmailValidationError::InternalError) // TODO we haven't worked out how account recovery works yet.
             }
             EmailValidationReason::RevokeMP(_uid,principal) => {
-                let mps = MPSpec::get();
-                let mps = (*mps).as_ref().map_err(internal_error_email)?;
+                let mps = MPSpec::get().map_err(internal_error_email)?;
                 let mp = mps.find_by_email(&sig.signed_message.unsigned.email).ok_or(EmailValidationError::MPEmailNotKnown)?;
                 if mp.badge_name()!=sig.parsed.name { return Err(EmailValidationError::BadgeNameDoesNotMatchEmailAddress)}
                 Ok(Badge{

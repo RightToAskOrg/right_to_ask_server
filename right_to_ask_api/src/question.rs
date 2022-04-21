@@ -202,8 +202,7 @@ impl PersonID {
                 if !user_exists(uid,conn).map_err(internal_error)? { return Err(QuestionError::InvalidUserSpecified) }
             }
             PersonID::MP(mp_id) => {
-                let mps = MPSpec::get();
-                let mps = (*mps).as_ref().map_err(internal_error)?;
+                let mps = MPSpec::get().map_err(internal_error)?;
                 if !mps.contains(mp_id) { return Err(QuestionError::InvalidMP) }
             }
             PersonID::Organisation(org) => {
@@ -314,8 +313,7 @@ impl QuestionAnswer {
     fn check_legal(&self,conn:&mut impl Queryable,uid:&UserUID) -> Result<(),QuestionError> {
         if self.answer.len()>MAX_ANSWER_LENGTH { return Err(QuestionError::AnswerTooLong); }
         if self.answered_by.is_some() || self.timestamp.is_some() { return Err(QuestionError::AnswerContainsUndesiredFields); }
-        let mps = MPSpec::get();
-        let mps = (*mps).as_ref().map_err(internal_error)?;
+        let mps = MPSpec::get().map_err(internal_error)?;
         if let Some(mp) = mps.find(&self.mp) {
             let badges : usize = conn.exec_first("SELECT COUNT(badge) from BADGES where UID=? and what=? and (badge='MP' || badge='MPStaff')",(uid,mp.badge_name())).map_err(internal_error)?.ok_or_else(||QuestionError::InternalError)?;
             if badges==0 { return Err(QuestionError::UserDoesNotHaveCorrectMPBadge); }

@@ -256,6 +256,15 @@ async fn info() -> Result<Json<Info>,Box<dyn std::error::Error + 'static>> {
     }))
 }
 
+#[post("/reload_info")]
+/// Force the server to reload the MPs.json file, the committees.json file, and the hearings.json file (without restarting).
+async fn reload_info() -> &'static str {
+    MPS.reset();
+    COMMITTEES.reset();
+    HEARINGS.reset();
+    "OK"
+}
+
 
 
 #[actix_web::main]
@@ -292,6 +301,7 @@ async fn main() -> anyhow::Result<()> {
             .service(committees)
             .service(hearings)
             .service(info)
+            .service(reload_info)
             .service(actix_files::Files::new("/journal/", "journal").use_last_modified(true).use_etag(true).show_files_listing())
             .service(actix_files::Files::new("/", find_web_resources()).use_last_modified(true).use_etag(true).index_file("index.html"))
     })

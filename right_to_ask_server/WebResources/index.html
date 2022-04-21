@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <title>Right to Ask Server</title>
+    <script src="util.js"></script>
 </head>
 
 <body>
@@ -14,6 +15,7 @@
 <a href="committees.json">Get list of committees</a> <br/>
 <a href="hearings.json">Get list of upcoming hearings</a> <br/>
 <a href="info.json">Get API level and hashes of above three files.</a> <br/>
+<button onclick="getWebJSON('reload_info',null,null,'dummy')">Force server to reload above files</button> <br/>
 <a href="get_server_public_key_spki">Get the server public key, base64 encoded SPKI format</a> <br/>
 <a href="get_server_public_key_raw">Get the server public key, base64 encoded 32 bytes ED25519</a> <br/>
 <a href="get_server_public_key_hex">Get the server public key, hex encoded 32 bytes ED25519</a> <br/>
