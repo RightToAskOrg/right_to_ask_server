@@ -1,3 +1,4 @@
+use std::path::Path;
 use right_to_ask_api::database::{initialize_bulletin_board_database, initialize_right_to_ask_database};
 
 fn main() -> anyhow::Result<()> {
@@ -9,8 +10,12 @@ fn main() -> anyhow::Result<()> {
         println!("Bulletin board database initialized.");
         initialize_right_to_ask_database()?;
         println!("Right To Ask database initialized.");
-        std::fs::remove_dir_all("journal")?;
-        println!("Removed old journal.");
+        if Path::new("journal").exists() {
+            std::fs::remove_dir_all("journal")?;
+            println!("Removed old journal.");
+        } else {
+            println!("No old journal to remove.");
+        }
     } else {
         println!("Nothing done.")
     }

@@ -16,6 +16,8 @@ use merkle_tree_bulletin_board::hash_history::{Timestamp, timestamp_now};
 use mysql::prelude::Queryable;
 use mysql::TxOpts;
 use sha2::{Digest, Sha256};
+use crate::committee::{CommitteeId, CommitteeIndexInDatabaseTable};
+use crate::common_file::COMMITTEES;
 use crate::database::{get_rta_database_connection, LogInBulletinBoard};
 use crate::mp::{get_org_id_from_database, MPId, MPIndexInDatabaseTable, MPSpec, OrgIndexInDatabaseTable};
 use crate::person::{user_exists, UserUID};
@@ -57,6 +59,8 @@ pub enum QuestionError {
     OrganisationNameTooLong,
     /// The provided MP is not one we recognise.
     InvalidMP,
+    /// The provided Committee is not one we recognise.
+    InvalidCommittee,
     /// The user to ask/answer the question does not exist.
     InvalidUserSpecified,
 }
@@ -140,14 +144,15 @@ pub enum PersonID {
     User(UserUID),
     MP(MPId),
     Organisation(OrgID),
+    Committee(CommitteeId),
 }
 
 impl PersonID {
     /// Get the people who should ask (role='Q') or answer (role='A') a question.
     fn get_for_question(conn:&mut impl Queryable,role:char,question:QuestionID) -> mysql::Result<Vec<PersonID>> {
-        let elements : Vec<(Option<UserUID>,Option<MPIndexInDatabaseTable>,Option<OrgIndexInDatabaseTable>)> = conn.exec_map("SELECT UID,MP,ORG from PersonForQuestion where QuestionId=? and ROLE=?",(&question.0,role.to_string()),|(uid,mp,org)|(uid,mp,org))?;
+        let elements : Vec<(Option<UserUID>,Option<MPIndexInDatabaseTable>,Option<OrgIndexInDatabaseTable>,Option<CommitteeIndexInDatabaseTable>)> = conn.exec_map("SELECT UID,MP,ORG,Committee from PersonForQuestion where QuestionId=? and ROLE=?",(&question.0,role.to_string()),|(uid,mp,org,committee)|(uid,mp,org,committee))?;
         let mut res = vec![];
-        for (uid,mp,org) in elements {
+        for (uid,mp,org,committee) in elements {
             let decoded = {
                 if let Some(uid) = uid { PersonID::User(uid) }
                 else if let Some(mp) = mp { // we may want to cache this for performance.
@@ -155,6 +160,13 @@ impl PersonID {
                         PersonID::MP(mp_id)
                     } else {
                         eprintln!("Missing mp {} for question {} role {}",mp,question,role);
+                        continue;
+                    }
+                } else if let Some(committee) = committee { // we may want to cache this for performance.
+                    if let Some(committee_id) = CommitteeId::read_from_database(conn,committee)? {
+                        PersonID::Committee(committee_id)
+                    } else {
+                        eprintln!("Missing committee {} for question {} role {}",committee,question,role);
                         continue;
                     }
                 } else if let Some(org) = org { // we may want to cache this for performance.
@@ -175,24 +187,28 @@ impl PersonID {
     }
     /// Add the given people to a given question.
     fn add_for_question(conn:&mut impl Queryable,role:char,question:QuestionID,people:HashSet<&PersonID>) -> mysql::Result<()> {
-        let mut references : Vec<(Option<UserUID>,Option<MPIndexInDatabaseTable>,Option<OrgIndexInDatabaseTable>)> = vec![];
+        let mut references : Vec<(Option<UserUID>,Option<MPIndexInDatabaseTable>,Option<OrgIndexInDatabaseTable>,Option<CommitteeIndexInDatabaseTable>)> = vec![];
         for &person in people.iter() {
             match person {
                 PersonID::User(uid) => {
-                    references.push((Some(uid.clone()),None,None));
+                    references.push((Some(uid.clone()),None,None,None));
                 }
                 PersonID::MP(mp_id) => {
                     let id = mp_id.get_id_from_database(conn)?;
-                    references.push((None,Some(id),None));
+                    references.push((None,Some(id),None,None));
                 }
                 PersonID::Organisation(org_name) => {
                     let id = get_org_id_from_database(org_name,conn)?;
-                    references.push((None,None,Some(id)));
+                    references.push((None,None,Some(id),None));
+                }
+                PersonID::Committee(committee_id) => {
+                    let id = committee_id.get_id_from_database(conn)?;
+                    references.push((None,None,None,Some(id)));
                 }
             }
         }
         let role = role.to_string();
-        conn.exec_batch("insert into PersonForQuestion (QuestionId,ROLE,UID,MP,ORG) values (?,?,?,?,?)",references.into_iter().map(|(uid,mp,org)|(question.0,&role,uid,mp,org)))?;
+        conn.exec_batch("insert into PersonForQuestion (QuestionId,ROLE,UID,MP,ORG,Committee) values (?,?,?,?,?,?)",references.into_iter().map(|(uid,mp,org,committee)|(question.0,&role,uid,mp,org,committee)))?;
         Ok(())
     }
 
@@ -207,6 +223,10 @@ impl PersonID {
             }
             PersonID::Organisation(org) => {
                 if org.len()>50 { return Err(QuestionError::OrganisationNameTooLong); }
+            }
+            PersonID::Committee(committee_id) => {
+                let mps = COMMITTEES.get_interpreted().map_err(internal_error)?;
+                if !mps.iter().any(|ci|ci.jurisdiction==committee_id.jurisdiction && ci.name==committee_id.name) { return Err(QuestionError::InvalidCommittee) }
             }
         }
         Ok(())

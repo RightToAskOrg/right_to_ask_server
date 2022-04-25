@@ -89,6 +89,31 @@ create table if not exists MP_IDs(
     INDEX(LastName(30))
 ) CHARACTER SET utf8;
 
+
+create table if not exists Committee_IDs(
+                                     id INT PRIMARY KEY NOT NULL AUTO_INCREMENT,
+                                     Jurisdiction     ENUM('ACT_Legislative_Assembly',
+                                     'Australian_House_Of_Representatives',
+                                     'Australian_Senate',
+                                     'NSW_Legislative_Assembly',
+                                     'NSW_Legislative_Council',
+                                     'NT_Legislative_Assembly',
+                                     'Qld_Legislative_Assembly',
+                                     'SA_House_Of_Assembly',
+                                     'SA_Legislative_Council',
+                                     'Vic_Legislative_Assembly',
+                                     'Vic_Legislative_Council',
+                                     'Tas_House_Of_Assembly',
+                                     'Tas_Legislative_Council',
+                                     'WA_Legislative_Assembly',
+                                     'WA_Legislative_Council',
+                                     'ACT','NSW','NT','QLD','SA','TAS','VIC','WA',
+	                                 'Federal') NOT NULL,
+    Name   TEXT NOT NULL,
+    INDEX(Jurisdiction),
+    INDEX(Name(30))
+) CHARACTER SET utf8;
+
 create table if not exists Organisations(
     id INT PRIMARY KEY NOT NULL AUTO_INCREMENT,
     OrgID TEXT NOT NULL,
@@ -102,6 +127,7 @@ create table if not exists PersonForQuestion
     UID VARCHAR(30) NULL,/* reference to UID in Users table, if it is a user */
     MP INT NULL, /* reference to an MP in MP_IDs table, if it is an MP */
     ORG INT NULL, /* reference to an organisation in Organisations table, if it is an organisation */
+    Committee INT NULL, /* reference to a committee in Committee_IDs table, if it is a committee */
     INDEX(QuestionId)
 ) CHARACTER SET utf8;
 

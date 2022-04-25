@@ -16,10 +16,12 @@ function editQuestion() {
         question_id : question_id,
         version : question.version,
     };
-    let background = document.getElementById("BackgroundText").value;
-    if (background!==question.background||"") { command.background = background };
+    let background = document.getElementById("BackgroundText").value || "";
+    console.log(background);
+    console.log(question.background||"");
+    if (background!==(question.background||"")) { command.background = background }
     let is_followup_to = document.getElementById("FollowUpTo").value;
-    if (is_followup_to!==(question.is_followup_to||"")) { command.is_followup_to = is_followup_to };
+    if (is_followup_to!==(question.is_followup_to||"")) { command.is_followup_to = is_followup_to }
     function parseUsers(list,ui,tag) {
         for (const s of document.getElementById(ui).value.split(',')) {
             let ss = s.trim();
@@ -30,7 +32,8 @@ function editQuestion() {
             }
         }
     }
-    let askList = addMPsAskList.slice(); // make a shallow copu
+    let askList = addMPsAskList.slice(); // make a shallow copy
+    for (const c of addCommitteesAskList) askList.push(c); // append committees.
     let answerList = addMPsAnswerList.slice(); // make a shallow copu
     parseUsers(askList,"AddUserAskList","User");
     parseUsers(answerList,"AddUserAnswerList","User");
@@ -100,6 +103,7 @@ function setQuestion(questionInfo) {
         document.getElementById("Answer").value="";
         document.getElementById("NewAnswerMP").innerText="";
         addMPsAskList = [];
+        addCommitteesAskList = [];
         addMPsAnswerList = [];
         actualAnswerer = null;
     } else if (questionInfo.Err) failure("Error : "+questionInfo.Err);
@@ -110,6 +114,7 @@ function updateQuestion() {
 }
 
 let addMPsAskList = [];
+let addCommitteesAskList = [];
 let addMPsAnswerList = [];
 let actualAnswerer = null;
 
@@ -118,9 +123,17 @@ function addMPToList(mp,ui,list) {
     span.append(" "+mp_id_tostring(mp));
     list.push({"MP":mp_id_of_mp(mp)});
 }
+function addCommitteeToList(committee,ui,list) {
+    const span = document.getElementById(ui);
+    span.append(" "+committee_id_tostring(committee));
+    list.push({"Committee":committee_id_of_committee(committee)});
+}
+
 
 function mp_id_tostring(mp) { return mp.first_name+" "+mp.surname+" ("+mp.electorate.chamber+(mp.electorate.region?(" "+mp.electorate.region):"")+")"; }
 function mp_id_of_mp(mp) { return {first_name : mp.first_name, surname: mp.surname, electorate : mp.electorate }; }
+function committee_id_tostring(committee) { return committee.name+" ("+committee.jurisdiction+")"; }
+function committee_id_of_committee(committee) { return {name : committee.name,jurisdiction : committee.jurisdiction }; }
 
 window.onload = function () {
     question_id = new URLSearchParams(window.location.search).get("question_id");
@@ -130,5 +143,8 @@ window.onload = function () {
         makePoliticianList("PoliticianAskList",mpList,function (mp) {addMPToList(mp,"AddMPAskList",addMPsAskList)});
         makePoliticianList("PoliticianAnswerList",mpList,function (mp) {addMPToList(mp,"AddMPAnswerList",addMPsAnswerList)});
         makePoliticianList("PoliticianDoAnswerList",mpList,function (mp) { actualAnswerer=mp_id_of_mp(mp); document.getElementById("NewAnswerMP").innerText=mp_id_tostring(mp); });
+    },failure);
+    getWebJSON("committees.json",function (committeeList) {
+        makeCommitteeList("CommitteeAskList",committeeList,function (committee) {addCommitteeToList(committee,"AddCommitteeAskList",addCommitteesAskList)});
     },failure);
 }
