@@ -74,6 +74,19 @@ and may fail if their format or URLs has changed.
 
 Alternatively, copy these files in from somewhere else.
 
+### Setting up word comparison datafiles
+
+In the right_to_ask directory, you need two files
+* `GeneralVocabulary.bin` providing an indexed list of synonyms and word frequency
+* `ListedKeywords.txt` providing domain specific data (e.g. nicknames for prominent politicians)
+
+See [WordComparison.md](WordComparison.md) for how to create these files, or alternatively just copy them in.
+Creating GeneralVocabulary.bin is a multi-hour process and it is easier to just copy the ~70mb file.
+
+### Setting up word comparison database
+
+Not needed yet as it is not attached yet.
+
 ### Running the server
 
 ```bash

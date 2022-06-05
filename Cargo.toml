@@ -4,4 +4,6 @@
 members = [
     "right_to_ask_api",
     "right_to_ask_server",
+    "word_comparison",
+    "word_comparison_demo_webserver",
 ]
