@@ -69,6 +69,9 @@ impl <Q : Clone+Display+PartialEq+FromStr> WordComparisonDatabaseBackend for Fla
         self.containing_known_word.clear();
         self.containing_unique.clear();
         if Path::new(&self.filename).exists() { remove_file(&self.filename)? };
+        if let Some(parent) = Path::new(&self.filename).parent() {
+            std::fs::create_dir_all(parent)?;
+        }
         Ok(())
     }
 

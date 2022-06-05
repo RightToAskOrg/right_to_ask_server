@@ -2,6 +2,7 @@
 //! The file database_url should contain something like "mysql://bulletinboard:ThisShouldBeReplacedByAPassword@localhost:3306/bulletinboard" without the quotes, and with the password something sensible.
 //! The file bulletin_board_url should contain something like "mysql://bulletinboard:ThisShouldBeReplacedByAPassword@localhost:3306/bulletinboard" without the quotes, and with the password something sensible.
 
+use std::ops::DerefMut;
 use mysql::{Pool, PooledConn, Conn, Opts};
 use once_cell::sync::Lazy;
 use futures::lock::{Mutex, MutexGuard};
@@ -12,8 +13,13 @@ use merkle_tree_bulletin_board::hash::HashValue;
 use mysql::prelude::Queryable;
 use crate::config::CONFIG;
 use crate::person::NewRegistration;
-use crate::question::{EditQuestionCommandPostedToBulletinBoard, NewQuestionCommandPostedToBulletinBoard};
+use crate::question::{EditQuestionCommandPostedToBulletinBoard, hash_from_value, NewQuestionCommandPostedToBulletinBoard};
 use serde::{Serialize,Deserialize};
+use word_comparison::comparison_list::ScoredIDs;
+use word_comparison::database_backend::WordComparisonDatabaseBackend;
+use word_comparison::flatfile_database_backend::FlatfileDatabaseBackend;
+use word_comparison::listed_keywords::ListedKeywords;
+use word_comparison::word_file::{WORD_MMAP_FILE, WordsInFile};
 use crate::signing::ClientSignedUnparsed;
 
 fn get_rta_database_pool_raw() -> Pool {
@@ -80,5 +86,44 @@ pub fn initialize_right_to_ask_database() -> anyhow::Result<()> {
     let mut conn = get_rta_database_pool_raw().get_conn().expect("Could not get rta database connection");
     let schema = include_str!("RTASchema.sql");
     conn.query_drop(schema)?;
+    Ok(())
+}
+
+static GENERAL_VOCABULARY_WORDS : Lazy<WordsInFile> = Lazy::new(|| { WordsInFile::read_word_file(WORD_MMAP_FILE).unwrap()  });
+static LISTED_KEYWORDS : Lazy<ListedKeywords> = Lazy::new(|| { ListedKeywords::load(ListedKeywords::STD_LOCATION).unwrap()  });
+
+const WORD_COMPARISON_PATH: &str = "data/WordComparison/Database.txt";
+static WORD_COMPARISON_BACKEND : Lazy<Mutex<FlatfileDatabaseBackend<HashValue>>> = Lazy::new(|| { Mutex::new(FlatfileDatabaseBackend::<HashValue>::new(WORD_COMPARISON_PATH,&GENERAL_VOCABULARY_WORDS,&LISTED_KEYWORDS).unwrap())  });
+
+/// Add a new question to the comparison_database. Typically done
+/// * After creating a new question and saving it into the right_to_ask database
+/// * When recreating the comparison database.
+pub async fn add_question_to_comparison_database(question:&str, id:HashValue) -> anyhow::Result<()> {
+    let mut backend =  WORD_COMPARISON_BACKEND.lock().await;
+    word_comparison::comparison_list::add_question(backend.deref_mut(),question,id,&GENERAL_VOCABULARY_WORDS,&LISTED_KEYWORDS)?;
+    Ok(())
+}
+
+pub async fn find_similar_text_question(question:&str) -> anyhow::Result<Vec<ScoredIDs<HashValue>>> {
+    let mut backend =  WORD_COMPARISON_BACKEND.lock().await;
+    word_comparison::comparison_list::find_similar_in_database(backend.deref_mut(),question,&GENERAL_VOCABULARY_WORDS,&LISTED_KEYWORDS)
+}
+
+/// Recreate the word comparison database. This generally doesn't result in any information being
+/// lost - it is done by destroying the word comparison database, recreating it, and then
+/// loading all questions from the RTA database and loading them into the word comparison database.
+pub async fn recreate_word_comparison_database() -> anyhow::Result<()> {
+    println!("Extracting existing questions");
+    let mut conn = get_rta_database_connection().await?;
+    let questions : Vec<(HashValue,String)> = conn.exec_map("SELECT QuestionId,Question from QUESTIONS",(),|(id,question)|(hash_from_value(id),question))?;
+    println!("Recreating database");
+    {
+        let mut backend =  WORD_COMPARISON_BACKEND.lock().await;
+        backend.clear_all_reinitialize()?;
+    }
+    for (id,question) in questions {
+        println!("Adding question : {}",question);
+        add_question_to_comparison_database(&question,id).await?;
+    }
     Ok(())
 }

@@ -560,7 +560,7 @@ pub struct QuestionInfo {
 
 /// Convert v into a HashValue where you know v will be a 32 byte value
 /// TODO make original functions in bulletin board code public.
-fn hash_from_value(v:mysql::Value) -> HashValue {
+pub fn hash_from_value(v:mysql::Value) -> HashValue {
     match v {
         mysql::Value::Bytes(b) if b.len()==32 => HashValue(b.try_into().unwrap()),
         // Value::NULL => {}
