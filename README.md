@@ -76,8 +76,6 @@ Alternatively, copy these files in from somewhere else.
 
 ### Setting up word comparison datafiles
 
-Note this is not currently needed to run the right_to_ask_server, but will be needed very soon.
-
 In the right_to_ask directory, you need two files
 * `GeneralVocabulary.bin` providing an indexed list of synonyms and word frequency
 * `ListedKeywords.txt` providing domain specific data (e.g. nicknames for prominent politicians)
@@ -90,8 +88,6 @@ programs here is running will result in undefined behaviour, such as permanently
 Don't do it*.
 
 ### Setting up word comparison database
-
-Note this is not currently needed to run the right_to_ask_server, but will be needed very soon.
 
 The word comparison database is designed to be easy to reconstruct by deleting it, and recreating
 from the RTA database. This should not result in any information loss. To do this run

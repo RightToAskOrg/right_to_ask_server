@@ -18,7 +18,7 @@ use mysql::TxOpts;
 use sha2::{Digest, Sha256};
 use crate::committee::{CommitteeId, CommitteeIndexInDatabaseTable};
 use crate::common_file::COMMITTEES;
-use crate::database::{get_rta_database_connection, LogInBulletinBoard};
+use crate::database::{add_question_to_comparison_database, get_rta_database_connection, LogInBulletinBoard};
 use crate::mp::{get_org_id_from_database, MPId, MPIndexInDatabaseTable, MPSpec, OrgIndexInDatabaseTable};
 use crate::person::{user_exists, UserUID};
 use crate::signing::ClientSigned;
@@ -407,7 +407,7 @@ impl QuestionNonDefiningFields {
         } else { return Err(QuestionError::QuestionDoesNotExist); }
         transaction.exec_drop("update QUESTIONS set LastModifiedTimestamp=?,Version=? where QuestionID=?", (timestamp,new_version.0,question_id.0)).map_err(internal_error)?;
         if let Some(background) = &self.background {
-            println!("Setting background to {}",background);
+            // println!("Setting background to {}",background);
             transaction.exec_drop("update QUESTIONS set Background=? where QuestionID=?", (background,question_id.0)).map_err(internal_error)?;
         }
         if !self.who_should_ask_the_question_permissions.is_no_change() {
@@ -531,6 +531,7 @@ impl NewQuestionCommand {
         };
         let version = LogInBulletinBoard::NewQuestion(for_bb).log_in_bulletin_board().await.map_err(bulletin_board_error)?;
         question.parsed.non_defining_fields.modify_database(question_id,version,None,timestamp,&question.signed_message.user).await?;
+        add_question_to_comparison_database(&question.parsed.question_text,question_id).await.map_err(internal_error)?;
         Ok(NewQuestionCommandResponse{ question_id, version })
     }
 }
