@@ -5,11 +5,12 @@ use std::path::PathBuf;
 use actix_web::web::Json;
 use right_to_ask_api::person::{NewRegistration, get_list_of_all_users, get_count_of_all_users, UserInfo, get_user_by_id, RequestEmailValidation, EmailProof, EmailAddress, EditUserDetails};
 use merkle_tree_bulletin_board::hash::HashValue;
-use right_to_ask_api::database::get_bulletin_board;
+use right_to_ask_api::database::{find_similar_text_question, get_bulletin_board};
 use merkle_tree_bulletin_board::hash_history::{FullProof, HashInfo};
 use right_to_ask_api::signing::{get_server_public_key_base64encoded, ServerSigned, get_server_public_key_raw_hex, get_server_public_key_raw_base64, ClientSigned};
 use right_to_ask_api::common_file::{COMMITTEES, HEARINGS, MPS};
 use right_to_ask_api::question::{EditQuestionCommand, NewQuestionCommand, QuestionID, QuestionInfo};
+use word_comparison::comparison_list::ScoredIDs;
 
 #[post("/new_registration")]
 async fn new_registration(command : Json<NewRegistration>) -> Json<Result<ServerSigned,String>> {
@@ -25,6 +26,16 @@ async fn edit_user(command : Json<ClientSigned<EditUserDetails>>) -> Json<Result
         let signed = ServerSigned::sign_string(res);
         Json(signed)
     }
+}
+
+async fn similar_questions_work(command:&NewQuestionCommand) -> anyhow::Result<Vec<ScoredIDs<QuestionID>>> {
+    let just_text = find_similar_text_question(&command.question_text).await?;
+    Ok(just_text) // TODO - add scores for metadata
+}
+
+#[post("/similar_questions")]
+async fn similar_questions(command : Json<NewQuestionCommand>) -> Json<Result<Vec<ScoredIDs<QuestionID>>,String>> {
+    Json(similar_questions_work(&command).await.map_err(|e|e.to_string()))
 }
 
 
@@ -192,29 +203,7 @@ fn find_web_resources() -> PathBuf {
     }
     panic!("Could not find WebResources. Please run in a directory containing it.")
 }
-/*
-#[get("/MPs.json")]
-async fn mps() -> std::io::Result<NamedFile> {
-    let file = NamedFile::open("data/MP_source/MPs.json")?;
-    Ok(file
-        .use_last_modified(true)
-        .set_content_disposition(ContentDisposition {
-            disposition: DispositionType::Attachment,
-            parameters: vec![DispositionParam::Filename("MPs.json".to_string())],
-        }))
-}*/
-/*
-struct BoxedVec(Arc<Vec<u8>>);
 
-impl Responder for BoxedVec {
-    type Body = Arc<Vec<u8>>;
-
-    fn respond_to(self, _req: &HttpRequest) -> HttpResponse<Self::Body> {
-        let res: Response<_> = self.into();
-        res.into()
-    }
-}
-*/
 #[get("/MPs.json")]
 async fn mps() -> Result<Vec<u8>,Box<dyn std::error::Error + 'static>> {
     let data =MPS.get_data()?;
@@ -284,6 +273,7 @@ async fn main() -> anyhow::Result<()> {
             .service(edit_user)
             .service(request_email_validation)
             .service(email_proof)
+            .service(similar_questions)
             .service(new_question)
             .service(edit_question)
             .service(get_user_list)
