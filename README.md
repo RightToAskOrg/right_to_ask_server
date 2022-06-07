@@ -1,4 +1,4 @@
-# Right to Ask server.
+ # Right to Ask server.
 
 ## Compiling
 
@@ -76,9 +76,9 @@ Alternatively, copy these files in from somewhere else.
 
 ### Setting up word comparison datafiles
 
-In the right_to_ask directory, you need two files
+In the right_to_ask_server directory, you need two files
 * `GeneralVocabulary.bin` providing an indexed list of synonyms and word frequency
-* `ListedKeywords.txt` providing domain specific data (e.g. nicknames for prominent politicians)
+* `ListedKeywords.csv` providing domain specific data (e.g. nicknames for prominent politicians)
 
 See [WordComparison.md](WordComparison.md) for how to create these files, or alternatively just copy them in.
 Creating GeneralVocabulary.bin is a multi-hour process and it is easier to just copy the ~70mb file.
@@ -94,7 +94,7 @@ from the RTA database. This should not result in any information loss. To do thi
 `./target/release/recreate_word_comparison_database`.
 
 This in principle needs to be done whenever
-* `GeneralVocabulary.bin` or `ListedKeywords.txt` have changed. (although it doesn't matter with the current textfile implementation, it will with more advanced backends)
+* `GeneralVocabulary.bin` or `ListedKeywords.csv` have changed. (although it doesn't matter with the current textfile implementation, it will with more advanced backends)
 * The RTA database has been recreated by running `./target/release/initialize_databases`.
 * The word comparison database schema changes. (fairly rare).
 
