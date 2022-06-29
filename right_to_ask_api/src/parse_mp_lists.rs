@@ -264,7 +264,11 @@ fn parse_act_la(path:&Path) -> anyhow::Result<Vec<MP>> {
         let role = tds[1].text().map(|t|t.trim()).join("; ");
         let electorate = tds[2].text().next().ok_or_else(||anyhow!("Could not find electorate in ACT html file"))?.trim();
         let party = tds[3].text().next().ok_or_else(||anyhow!("Could not find party in ACT html file"))?.trim();
-        let email = tds[4].text().find(|t|t.trim().ends_with("act.gov.au")).ok_or_else(||anyhow!("Could not find email in ACT html file"))?.trim();
+        let email = tds[4].text().find(|t|t.trim().ends_with("act.gov.au"));
+        if email.is_none() { // This genuinely occurs once as of June 30, 2022 for Ed Cocks.
+            println!("Warning - could not find email in ACT html file for {}", name);
+        }
+        let email = email.unwrap_or("");
         if let Some((surname,first_name)) = name.split_once(',') {
             // println!("name : {} electorate {} email {} role {}",name,electorate,email,role);
             let mp = MP{
@@ -503,7 +507,7 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     let dir = PathBuf::from_str(MP_SOURCE)?;
 
     // NT
-    let nt_members = download_to_file("https://parliament.nt.gov.au/__data/assets/pdf_file/0004/932971/MASTER-List-of-Members-Fourteenth-Assembly-as-at-December-2021.pdf").await?;
+    let nt_members = download_to_file("https://parliament.nt.gov.au/__data/assets/pdf_file/0004/932971/MASTER-List-of-Members-Fourteenth-Assembly-as-at-May-2022.pdf").await?;
     parse_nt_la_pdf(nt_members.path())?;
     nt_members.persist(dir.join(Chamber::NT_Legislative_Assembly.to_string()+".pdf"))?;
 
