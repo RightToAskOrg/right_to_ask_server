@@ -3,6 +3,7 @@
 //! The file bulletin_board_url should contain something like "mysql://bulletinboard:ThisShouldBeReplacedByAPassword@localhost:3306/bulletinboard" without the quotes, and with the password something sensible.
 
 use std::ops::DerefMut;
+use anyhow::anyhow;
 use mysql::{Pool, PooledConn, Conn, Opts};
 use once_cell::sync::Lazy;
 use futures::lock::{Mutex, MutexGuard};
@@ -20,7 +21,11 @@ use word_comparison::database_backend::WordComparisonDatabaseBackend;
 use word_comparison::flatfile_database_backend::FlatfileDatabaseBackend;
 use word_comparison::listed_keywords::ListedKeywords;
 use word_comparison::word_file::{WORD_MMAP_FILE, WordsInFile};
-use crate::signing::ClientSignedUnparsed;
+use crate::censorship::{CensorQuestionCommand, ReportQuestionCommand};
+use crate::signing::{ClientSigned, ClientSignedUnparsed};
+
+pub const RTA_DATABASE_VERSION_REQUIRED : usize = 2;
+
 
 fn get_rta_database_pool_raw() -> Pool {
     let opts = Opts::from_url(&CONFIG.database.rta).expect("Could not parse database_url url");
@@ -51,6 +56,19 @@ pub async fn get_bulletin_board() -> MutexGuard<'static,BulletinBoard<BackendJou
     BACKEND.lock().await
 }
 
+pub async fn get_rta_database_version() -> anyhow::Result<usize> {
+    let mut conn = get_rta_database_connection().await?;
+    if let Some(version) = conn.query_first("select version from SchemaVersion").map_err(|e|anyhow!("Error getting version from the database. This may be because it is a pre 26 July 2022 version of the database. Either recreate the database with the initialize_database program, or see the instructions in right_to_ask_apo/src/RTASchemaUpdates/2.sql. Original error {}",e))? {
+        Ok(version)
+    } else { Err(anyhow!("No version specification. "))}
+}
+
+/// Check that the RTA database that we are talking to is the correct version.
+pub async fn check_rta_database_version_current() -> anyhow::Result<()> {
+    let version = get_rta_database_version().await?;
+    if version==RTA_DATABASE_VERSION_REQUIRED { Ok(())} else { Err(anyhow!("RTA database is not current. Please update it using initialize_database. Current version {} required version {}",version,RTA_DATABASE_VERSION_REQUIRED))}
+}
+
 /// Something that may be logged in the bulletin board.
 #[derive(Serialize,Deserialize,Debug,Clone)]
 pub enum LogInBulletinBoard {
@@ -59,6 +77,8 @@ pub enum LogInBulletinBoard {
     EmailVerification(ClientSignedUnparsed),
     NewQuestion(NewQuestionCommandPostedToBulletinBoard),
     EditQuestion(EditQuestionCommandPostedToBulletinBoard),
+    ReportQuestion(ClientSigned<ReportQuestionCommand>), // do we want to log these???
+    CensorQuestion(CensorQuestionCommand),
 }
 
 impl LogInBulletinBoard {
@@ -104,6 +124,13 @@ pub async fn add_question_to_comparison_database(question:&str, id:HashValue) ->
     Ok(())
 }
 
+/// Remove a question from the comparison_database. Done after censorship
+pub async fn remove_question_from_comparison_database(_id:HashValue) -> anyhow::Result<()> {
+    let mut _backend =  WORD_COMPARISON_BACKEND.lock().await;
+    // TODO something sensible.
+    Ok(())
+}
+
 pub async fn find_similar_text_question(question:&str) -> anyhow::Result<Vec<ScoredIDs<HashValue>>> {
     let mut backend =  WORD_COMPARISON_BACKEND.lock().await;
     word_comparison::comparison_list::find_similar_in_database(backend.deref_mut(),question,&GENERAL_VOCABULARY_WORDS,&LISTED_KEYWORDS)
@@ -115,7 +142,7 @@ pub async fn find_similar_text_question(question:&str) -> anyhow::Result<Vec<Sco
 pub async fn recreate_word_comparison_database() -> anyhow::Result<()> {
     println!("Extracting existing questions");
     let mut conn = get_rta_database_connection().await?;
-    let questions : Vec<(HashValue,String)> = conn.exec_map("SELECT QuestionId,Question from QUESTIONS",(),|(id,question)|(hash_from_value(id),question))?;
+    let questions : Vec<(HashValue,String)> = conn.exec_map("SELECT QuestionId,Question from QUESTIONS where censored=FALSE",(),|(id,question)|(hash_from_value(id),question))?;
     println!("Recreating database");
     {
         let mut backend =  WORD_COMPARISON_BACKEND.lock().await;

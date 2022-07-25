@@ -59,6 +59,7 @@ create table if not exists QUESTIONS
     CanOthersSetWhoShouldAnswer BOOLEAN NOT NULL,
     AnswerAccepted  BOOLEAN NOT NULL,
     FollowUpTo  BINARY(32) NULL,
+    censored BOOLEAN NOT NULL DEFAULT FALSE,
     INDEX(LastModifiedTimestamp),
     INDEX(CreatedBy)
 ) CHARACTER SET utf8;
@@ -141,3 +142,12 @@ create table if not exists Answer
     INDEX(QuestionId),
     INDEX(MP)
 ) CHARACTER SET utf8;
+
+
+create table SchemaVersion
+(
+    version INT
+);
+
+insert into SchemaVersion (version) values (2);
+

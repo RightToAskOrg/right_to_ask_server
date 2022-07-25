@@ -12,6 +12,7 @@ pub mod parse_upcoming_hearings;
 mod parse_util;
 pub mod committee;
 pub mod common_file;
+pub mod censorship;
 
 #[cfg(test)]
 mod tests {

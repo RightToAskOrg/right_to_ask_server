@@ -63,6 +63,8 @@ pub enum QuestionError {
     InvalidCommittee,
     /// The user to ask/answer the question does not exist.
     InvalidUserSpecified,
+    /// The question exists, but was censored.
+    Censored,
 }
 
 impl Display for QuestionError {
@@ -489,11 +491,11 @@ pub struct NewQuestionCommandResponse {
     pub version : LastQuestionUpdate,
 }
 
-fn internal_error<T:Debug>(error:T) -> QuestionError {
+pub(crate) fn internal_error<T:Debug>(error:T) -> QuestionError {
     eprintln!("Internal error {:?}",error);
     QuestionError::InternalError
 }
-fn bulletin_board_error(error:anyhow::Error) -> QuestionError {
+pub(crate) fn bulletin_board_error(error:anyhow::Error) -> QuestionError {
     eprintln!("Bulletin Board error {:?}",error);
     QuestionError::CouldNotWriteToBulletinBoard
 }
@@ -555,7 +557,7 @@ pub struct QuestionInfo {
     #[serde(flatten)]
     non_defining : QuestionNonDefiningFields,
     question_id : QuestionID,
-    version : LastQuestionUpdate,
+    pub(crate) version : LastQuestionUpdate,
     last_modified : Timestamp,
 }
 
@@ -584,7 +586,8 @@ impl QuestionInfo {
     /// Get information about a question from the database.
     pub async fn lookup(question_id:QuestionID) -> Result<Option<QuestionInfo>,QuestionError> {
         let mut conn = get_rta_database_connection().await.map_err(internal_error)?;
-        if let Some((question_text,timestamp,last_modified,version,author,background,who_should_ask_the_question_permissions,who_should_answer_the_question_permissions,answer_accepted,is_followup_to)) = conn.exec_first("SELECT Question,CreatedTimestamp,LastModifiedTimestamp,Version,CreatedBy,Background,CanOthersSetWhoShouldAsk,CanOthersSetWhoShouldAnswer,AnswerAccepted,FollowUpTo from QUESTIONS where QuestionID=?",(question_id.0,)).map_err(internal_error)? {
+        if let Some((question_text,timestamp,last_modified,version,author,background,who_should_ask_the_question_permissions,who_should_answer_the_question_permissions,answer_accepted,is_followup_to,censored)) = conn.exec_first("SELECT Question,CreatedTimestamp,LastModifiedTimestamp,Version,CreatedBy,Background,CanOthersSetWhoShouldAsk,CanOthersSetWhoShouldAnswer,AnswerAccepted,FollowUpTo,censored from QUESTIONS where QuestionID=?",(question_id.0,)).map_err(internal_error)? {
+            if censored { return Err(QuestionError::Censored); }
             match opt_hash_from_value(version) {
                 None => Ok(None),
                 Some(version) => {
@@ -692,35 +695,3 @@ impl EditQuestionCommand {
 
 
 
-
-
-
-/*************************************************************************
-                        FLAG A QUESTION
- *************************************************************************/
-
-#[derive(Serialize,Deserialize,Copy,Clone)]
-pub enum FlagReason {
-    NotAQuestion,
-    ThreateningViolence,
-    IncludesPrivateInformation,
-    IncitesHatred,
-    EncouragesHarm,
-    TargetedHarassment,
-    DefamatoryInsinuation, // You're allowed to ask a real question, including some that may be perceived as offensive, but you're not allowed to ask
-                           // questions that presuppose misbehaviour unless it is a matter of public record.
-                           // e.g. it's OK to ask, "Is it true, as alleged by X, that you accepted a bribe..."
-                           // but you're not allowed to ask "When are you going to stop taking bribes"?
-}
-
-
-
-/// This is used to flag a question as deserving of censorship.
-/// Its intention is to allow people to inform the server of questions that are threatening, abusive, etc.
-/// Exactly how this translates into a censor instruction to the BB is undefined - for example, it could be automatic based on the fraction of viewers who flag it, or it could require human intervention.
-/// There is still a lot of work to go here.
-#[derive(Serialize,Deserialize)]
-pub struct FlagQuestion {
-    question_id : QuestionID,
-    reason : FlagReason,
-}

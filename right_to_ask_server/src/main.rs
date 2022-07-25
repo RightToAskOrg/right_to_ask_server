@@ -5,8 +5,9 @@ use std::path::PathBuf;
 use actix_web::web::Json;
 use right_to_ask_api::person::{NewRegistration, get_list_of_all_users, get_count_of_all_users, UserInfo, get_user_by_id, RequestEmailValidation, EmailProof, EmailAddress, EditUserDetails};
 use merkle_tree_bulletin_board::hash::HashValue;
-use right_to_ask_api::database::{find_similar_text_question, get_bulletin_board};
+use right_to_ask_api::database::{check_rta_database_version_current, find_similar_text_question, get_bulletin_board};
 use merkle_tree_bulletin_board::hash_history::{FullProof, HashInfo};
+use right_to_ask_api::censorship::{CensorQuestionCommand, ReportQuestionCommand};
 use right_to_ask_api::signing::{get_server_public_key_base64encoded, ServerSigned, get_server_public_key_raw_hex, get_server_public_key_raw_base64, ClientSigned};
 use right_to_ask_api::common_file::{COMMITTEES, HEARINGS, MPS};
 use right_to_ask_api::question::{EditQuestionCommand, NewQuestionCommand, QuestionID, QuestionInfo};
@@ -138,6 +139,22 @@ async fn get_question_list() -> Json<Result<Vec<QuestionID>,String>> {
     Json(QuestionInfo::get_list_of_all_questions().await.map_err(|e|e.to_string()))
 }
 
+// TODO put admin authentication on this
+#[post("/censor_question")]
+async fn censor_question(command : Json<CensorQuestionCommand>) -> Json<Result<HashValue,String>> {
+    Json(command.censor_question().await.map_err(|e|e.to_string()))
+}
+
+#[post("/report_question")]
+async fn report_question(command : Json<ClientSigned<ReportQuestionCommand>>) -> Json<Result<ServerSigned,String>> {
+    if let Err(signing_error) = command.signed_message.check_signature().await {
+        Json(Err(signing_error.to_string()))
+    } else {
+        let res = ReportQuestionCommand::report_question(&command).await;
+        let signed = res.map_err(|e|e.to_string()).map(|h|ServerSigned::new_string(h.to_string()));
+        Json(signed)
+    }
+}
 
 
 // Bulletin board api calls
@@ -259,6 +276,7 @@ async fn reload_info() -> &'static str {
 #[actix_web::main]
 async fn main() -> anyhow::Result<()> {
     // check whether everything is working before starting the web server. Don't want to find out in the middle of a transaction.
+    check_rta_database_version_current().await?;
     println!("Server public key {}",get_server_public_key_raw_base64());
     println!("Bulletin board latest published root {:?}",get_bulletin_board().await.get_most_recent_published_root()?);
     println!("{} users in the database",get_count_of_all_users().await?);
@@ -280,6 +298,8 @@ async fn main() -> anyhow::Result<()> {
             .service(get_user)
             .service(get_question_list)
             .service(get_question)
+            .service(censor_question)
+            .service(report_question)
             .service(censor_leaf)
             .service(get_parentless_unpublished_hash_values)
             .service(get_most_recent_published_root)

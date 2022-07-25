@@ -1,0 +1,40 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="common.css">
+    <script src="util.js"></script>
+    <script src="common.js"></script>
+    <script src="signing.js"></script>
+    <script src="CensorQuestion.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tweetnacl/1.0.3/nacl-fast.min.js"></script>
+    <title>Censor Question - Administration only</title>
+</head>
+<body>
+
+
+<label for="QuestionID">Question ID: </label><input type="text" id="QuestionID"/><br/>
+
+<label for="Reason">Reason for censorship: </label><select id="Reason">
+    <option value="NotAQuestion">NotAQuestion</option>
+    <option value="ThreateningViolence">ThreateningViolence</option>
+    <option value="IncludesPrivateInformation">IncludesPrivateInformation</option>
+    <option value="IncitesHatredOrDiscrimination">IncitesHatredOrDiscrimination</option>
+    <option value="EncouragesHarm">EncouragesHarm</option>
+    <option value="TargetedHarassment">TargetedHarassment</option>
+    <option value="DefamatoryInsinuation">DefamatoryInsinuation</option>
+    <option value="Illegal">Illegal</option>
+</select><br/>
+
+<input type="checkbox" id="CensorLogs"> <label for="CensorLogs">Censor the bulletin board logs as well</label><br/>
+
+<button id="Censor">Gloriously censor question for a harmonious future</button>
+
+
+<div id="status">
+    <h5>Status</h5>
+</div>
+
+</body>
+</html>
