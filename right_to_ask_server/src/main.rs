@@ -7,7 +7,7 @@ use right_to_ask_api::person::{NewRegistration, get_list_of_all_users, get_count
 use merkle_tree_bulletin_board::hash::HashValue;
 use right_to_ask_api::database::{check_rta_database_version_current, find_similar_text_question, get_bulletin_board};
 use merkle_tree_bulletin_board::hash_history::{FullProof, HashInfo};
-use right_to_ask_api::censorship::{CensorQuestionCommand, ReportQuestionCommand};
+use right_to_ask_api::censorship::{CensorQuestionCommand, QuestionHistory, ReportQuestionCommand};
 use right_to_ask_api::signing::{get_server_public_key_base64encoded, ServerSigned, get_server_public_key_raw_hex, get_server_public_key_raw_base64, ClientSigned};
 use right_to_ask_api::common_file::{COMMITTEES, HEARINGS, MPS};
 use right_to_ask_api::question::{EditQuestionCommand, NewQuestionCommand, QuestionID, QuestionInfo};
@@ -133,6 +133,12 @@ async fn get_question(query:web::Query<QueryQuestion>) -> Json<Result<Option<Que
     Json(QuestionInfo::lookup(query.question_id).await.map_err(|e|e.to_string()))
 }
 
+#[get("/get_question_history")]
+async fn get_question_history(query:web::Query<QueryQuestion>) -> Json<Result<QuestionHistory,String>> {
+    Json(QuestionHistory::lookup(query.question_id).await.map_err(|e|e.to_string()))
+}
+
+
 /// For testing only!
 #[get("/get_question_list")]
 async fn get_question_list() -> Json<Result<Vec<QuestionID>,String>> {
@@ -163,7 +169,7 @@ struct Censor {
     leaf_to_censor : HashValue,
 }
 
-// TODO put admin authentication on this
+// TODO put admin authentication on this. Or just delete it.
 #[post("/censor_leaf")]
 async fn censor_leaf(command : Json<Censor>) -> Json<Result<(),String>> {
     Json(get_bulletin_board().await.censor_leaf(command.leaf_to_censor).map_err(|e|e.to_string()))
@@ -298,6 +304,7 @@ async fn main() -> anyhow::Result<()> {
             .service(get_user)
             .service(get_question_list)
             .service(get_question)
+            .service(get_question_history)
             .service(censor_question)
             .service(report_question)
             .service(censor_leaf)

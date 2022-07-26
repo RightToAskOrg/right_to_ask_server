@@ -21,10 +21,10 @@ use word_comparison::database_backend::WordComparisonDatabaseBackend;
 use word_comparison::flatfile_database_backend::FlatfileDatabaseBackend;
 use word_comparison::listed_keywords::ListedKeywords;
 use word_comparison::word_file::{WORD_MMAP_FILE, WordsInFile};
-use crate::censorship::{CensorQuestionCommand, ReportQuestionCommand};
-use crate::signing::{ClientSigned, ClientSignedUnparsed};
+use crate::censorship::{CensorQuestionCommandPostedToBulletinBoard, ReportQuestionCommandPostedToBulletinBoard};
+use crate::signing::ClientSignedUnparsed;
 
-pub const RTA_DATABASE_VERSION_REQUIRED : usize = 2;
+pub const RTA_DATABASE_VERSION_REQUIRED : usize = 3;
 
 
 fn get_rta_database_pool_raw() -> Pool {
@@ -66,7 +66,7 @@ pub async fn get_rta_database_version() -> anyhow::Result<usize> {
 /// Check that the RTA database that we are talking to is the correct version.
 pub async fn check_rta_database_version_current() -> anyhow::Result<()> {
     let version = get_rta_database_version().await?;
-    if version==RTA_DATABASE_VERSION_REQUIRED { Ok(())} else { Err(anyhow!("RTA database is not current. Please update it using initialize_database. Current version {} required version {}",version,RTA_DATABASE_VERSION_REQUIRED))}
+    if version==RTA_DATABASE_VERSION_REQUIRED { Ok(())} else { Err(anyhow!("RTA database is not current. Please update it using `initialize_database --upgrade`. Current version {} required version {}",version,RTA_DATABASE_VERSION_REQUIRED))}
 }
 
 /// Something that may be logged in the bulletin board.
@@ -77,8 +77,8 @@ pub enum LogInBulletinBoard {
     EmailVerification(ClientSignedUnparsed),
     NewQuestion(NewQuestionCommandPostedToBulletinBoard),
     EditQuestion(EditQuestionCommandPostedToBulletinBoard),
-    ReportQuestion(ClientSigned<ReportQuestionCommand>), // do we want to log these???
-    CensorQuestion(CensorQuestionCommand),
+    ReportQuestion(ReportQuestionCommandPostedToBulletinBoard), // do we want to log these???
+    CensorQuestion(CensorQuestionCommandPostedToBulletinBoard),
 }
 
 impl LogInBulletinBoard {
@@ -102,8 +102,24 @@ pub fn initialize_bulletin_board_database() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// List of all the versions of the RTA schema for which an incremental upgrade can be done automatically by running a SQL script.
+const UPGRADABLE_VERSIONS: [(usize, &'static str);1] = [
+    (3,include_str!("RTASchemaUpdates/3.sql"))
+];
+
+pub fn upgrade_right_to_ask_database(current_version:usize) -> anyhow::Result<()> {
+    if let Some((_,schema)) = UPGRADABLE_VERSIONS.iter().find(|(v,_)|*v==current_version+1) {
+        let mut conn = get_rta_database_pool_raw().get_conn().expect("Could not get RTA database connection");
+        conn.query_drop(schema)?;
+        Ok(())
+    } else {
+        Err(anyhow!("Sorry, you cannot upgrade version {} automatically",current_version))
+    }
+}
+
+
 pub fn initialize_right_to_ask_database() -> anyhow::Result<()> {
-    let mut conn = get_rta_database_pool_raw().get_conn().expect("Could not get rta database connection");
+    let mut conn = get_rta_database_pool_raw().get_conn().expect("Could not get RTA database connection");
     let schema = include_str!("RTASchema.sql");
     conn.query_drop(schema)?;
     Ok(())

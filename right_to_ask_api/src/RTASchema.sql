@@ -139,6 +139,9 @@ create table if not exists Answer
     MP          INT NOT NULL, /* reference to an MP in MP_IDs table */
     timestamp   BIGINT UNSIGNED NOT NULL,
     answer      TEXT NOT NULL,
+    version     BINARY(32), /* when the answer was created. Used as a key for censoring */
+    censored    BOOLEAN NOT NULL DEFAULT FALSE,
+    INDEX(version),
     INDEX(QuestionId),
     INDEX(MP)
 ) CHARACTER SET utf8;
@@ -149,5 +152,5 @@ create table SchemaVersion
     version INT
 );
 
-insert into SchemaVersion (version) values (2);
+insert into SchemaVersion (version) values (3);
 

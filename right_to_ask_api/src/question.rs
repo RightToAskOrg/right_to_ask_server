@@ -14,7 +14,7 @@ use serde::{Serialize, Deserialize};
 use merkle_tree_bulletin_board::hash::HashValue;
 use merkle_tree_bulletin_board::hash_history::{Timestamp, timestamp_now};
 use mysql::prelude::Queryable;
-use mysql::TxOpts;
+use mysql::{Transaction, TxOpts};
 use sha2::{Digest, Sha256};
 use crate::committee::{CommitteeId, CommitteeIndexInDatabaseTable};
 use crate::common_file::COMMITTEES;
@@ -65,6 +65,11 @@ pub enum QuestionError {
     InvalidUserSpecified,
     /// The question exists, but was censored.
     Censored,
+    /// The data in the bulletin board is not consistent and cannot be loaded.
+    /// Note that old format data in the bulletin board can cause this.
+    BulletinBoardHistoryIsCorrupt,
+    /// Trying to report or censor an answer that is either not an answer to the question or is already censored.
+    NotAnUncensoredAnswer,
 }
 
 impl Display for QuestionError {
@@ -303,22 +308,30 @@ pub struct QuestionNonDefiningFields {
 pub struct QuestionAnswer {
     /// must be a MP. Set by server to whoever signed the message - client should not set this when sending to server.
     #[serde(skip_serializing_if = "Option::is_none",default)]
-    answered_by : Option<UserUID>,
-    mp : MPId,
-    answer : String,
+    pub answered_by : Option<UserUID>,
+    pub mp : MPId,
+    pub answer : String,
     /// set by server - client should not set this when sending to server.
     #[serde(skip_serializing_if = "Option::is_none",default)]
-    timestamp : Option<Timestamp>,
+    pub timestamp : Option<Timestamp>,
+    /// Whether this answer has been censored.
+    /// set by server - client should not set this when sending to server.
+    #[serde(skip_serializing_if = "is_false",default)]
+    pub censored : bool,
+    /// The bulletin board identifier associated with this answer. Used for flagging/censorship.
+    /// set by server - client should not set this when sending to server.
+    #[serde(skip_serializing_if = "Option::is_none",default)]
+    pub version : Option<HashValue>,
 }
 
 impl QuestionAnswer {
     /// Get the answers to a question.
     fn get_for_question(conn:&mut impl Queryable,question:QuestionID) -> mysql::Result<Vec<QuestionAnswer>> {
-        let entries : Vec<(UserUID,MPIndexInDatabaseTable,Timestamp,String)> = conn.exec("SELECT author,mp,timestamp,answer from Answer where QuestionId=? order by timestamp",(&question.0,))?;
+        let entries : Vec<(UserUID,MPIndexInDatabaseTable,Timestamp,String,bool,mysql::Value)> = conn.exec("SELECT author,mp,timestamp,answer,censored,version from Answer where QuestionId=? order by timestamp",(&question.0,))?;
         let mut res : Vec<QuestionAnswer> = vec![];
-        for (answered_by,mp,timestamp,answer) in entries {
+        for (answered_by,mp,timestamp,answer,censored,version) in entries {
             if let Some(mp_id) = MPId::read_from_database(conn,mp)? {
-                res.push(QuestionAnswer{answered_by:Some(answered_by),mp:mp_id,answer,timestamp: Some(timestamp) })
+                res.push(QuestionAnswer{answered_by:Some(answered_by),mp:mp_id,answer,timestamp: Some(timestamp),censored,version:opt_hash_from_value(version) })
             } else {
                 eprintln!("Missimg mp {} in question {} answer",mp,question);
             }
@@ -326,15 +339,15 @@ impl QuestionAnswer {
         Ok(res)
     }
     /// Add a given answer to the database.
-    fn add_for_question(&self,conn:&mut impl Queryable,question:QuestionID,timestamp:Timestamp,uid:&UserUID) -> mysql::Result<()> {
+    fn add_for_question(&self,conn:&mut impl Queryable,question:QuestionID,timestamp:Timestamp,uid:&UserUID,version:HashValue) -> mysql::Result<()> {
         let mp = self.mp.get_id_from_database(conn)?;
-        conn.exec_drop("insert into Answer (QuestionId,author,mp,timestamp,answer) values (?,?,?,?,?)",(&question.0,uid,mp,timestamp,&self.answer))?;
+        conn.exec_drop("insert into Answer (QuestionId,author,mp,timestamp,answer,version) values (?,?,?,?,?)",(&question.0,uid,mp,timestamp,&self.answer,&version.0))?;
         Ok(())
     }
 
     fn check_legal(&self,conn:&mut impl Queryable,uid:&UserUID) -> Result<(),QuestionError> {
         if self.answer.len()>MAX_ANSWER_LENGTH { return Err(QuestionError::AnswerTooLong); }
-        if self.answered_by.is_some() || self.timestamp.is_some() { return Err(QuestionError::AnswerContainsUndesiredFields); }
+        if self.answered_by.is_some() || self.timestamp.is_some() || self.censored || self.version.is_some() { return Err(QuestionError::AnswerContainsUndesiredFields); }
         let mps = MPSpec::get().map_err(internal_error)?;
         if let Some(mp) = mps.find(&self.mp) {
             let badges : usize = conn.exec_first("SELECT COUNT(badge) from BADGES where UID=? and what=? and (badge='MP' || badge='MPStaff')",(uid,mp.badge_name())).map_err(internal_error)?.ok_or_else(||QuestionError::InternalError)?;
@@ -350,6 +363,19 @@ pub struct HansardLink {
     pub url : String, // Should this be more structured?
 }
 
+/// Any modification to the question database will have to
+///  * Check that the database version is the expected version.
+///  * modify the version and last updated timestamp.
+///
+/// This does these common tasks.
+pub(crate) async fn modify_question_database_version_and_time(transaction:&mut Transaction<'_>,question_id:QuestionID,new_version:LastQuestionUpdate,expecting_version:Option<LastQuestionUpdate>,timestamp:Timestamp) -> Result<(),QuestionError>{
+    if let Some(current_version) = transaction.exec_first::<mysql::Value,_,_>("select Version from QUESTIONS where QuestionID=?",(question_id.0,)).map_err(internal_error)? {
+        let expected : mysql::Value = expecting_version.map(|v|v.0).into();
+        if expected!=current_version { return Err(QuestionError::LastUpdateIsNotCurrent); }
+    } else { return Err(QuestionError::QuestionDoesNotExist); }
+    transaction.exec_drop("update QUESTIONS set LastModifiedTimestamp=?,Version=? where QuestionID=?", (timestamp,new_version.0,question_id.0)).map_err(internal_error)?;
+    Ok(())
+}
 
 impl QuestionNonDefiningFields {
     /// Check that all the fields are legal to modify.
@@ -398,16 +424,13 @@ impl QuestionNonDefiningFields {
         Ok(())
     }
 
+
     /// Add a simple question to the database, without any extra information yet.
     async fn modify_database(&self,question_id:QuestionID,new_version:LastQuestionUpdate,expecting_version:Option<LastQuestionUpdate>,timestamp:Timestamp,uid:&UserUID) -> Result<(),QuestionError> {
         println!("modify_database with question non-defining fields {:?}",self);
         let mut conn = get_rta_database_connection().await.map_err(internal_error)?;
         let mut transaction = conn.start_transaction(TxOpts::default()).map_err(internal_error)?;
-        if let Some(current_version) = transaction.exec_first::<mysql::Value,_,_>("select Version from QUESTIONS where QuestionID=?",(question_id.0,)).map_err(internal_error)? {
-            let expected : mysql::Value = expecting_version.map(|v|v.0).into();
-            if expected!=current_version { return Err(QuestionError::LastUpdateIsNotCurrent); }
-        } else { return Err(QuestionError::QuestionDoesNotExist); }
-        transaction.exec_drop("update QUESTIONS set LastModifiedTimestamp=?,Version=? where QuestionID=?", (timestamp,new_version.0,question_id.0)).map_err(internal_error)?;
+        modify_question_database_version_and_time(&mut transaction,question_id,new_version,expecting_version,timestamp).await?;
         if let Some(background) = &self.background {
             // println!("Setting background to {}",background);
             transaction.exec_drop("update QUESTIONS set Background=? where QuestionID=?", (background,question_id.0)).map_err(internal_error)?;
@@ -434,7 +457,7 @@ impl QuestionNonDefiningFields {
             transaction.exec_drop("update QUESTIONS set FollowUpTo=? where QuestionID=?", (follow_up_to.0,question_id.0)).map_err(internal_error)?;
         }
         for a in &self.answers {
-            a.add_for_question(&mut transaction,question_id,timestamp,uid).map_err(internal_error)?;
+            a.add_for_question(&mut transaction,question_id,timestamp,uid,new_version).map_err(internal_error)?;
         }
         // TODO insert answer_accepted and hansard_link.
         transaction.commit().map_err(internal_error)?;
@@ -553,12 +576,12 @@ impl NewQuestionCommand {
 #[derive(Serialize,Deserialize,Debug,Clone)]
 pub struct QuestionInfo {
     #[serde(flatten)]
-    defining : QuestionDefiningFields,
+    pub(crate) defining : QuestionDefiningFields,
     #[serde(flatten)]
-    non_defining : QuestionNonDefiningFields,
-    question_id : QuestionID,
+    pub(crate) non_defining : QuestionNonDefiningFields,
+    pub(crate) question_id : QuestionID,
     pub(crate) version : LastQuestionUpdate,
-    last_modified : Timestamp,
+    pub(crate) last_modified : Timestamp,
 }
 
 /// Convert v into a HashValue where you know v will be a 32 byte value
