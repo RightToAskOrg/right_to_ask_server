@@ -8,6 +8,10 @@ function showQuestion(div,user) {
     const editA = add(div,"a")
     editA.innerText="Edit";
     editA.href="EditQuestion.html?question_id="+encodeURIComponent(user);
+    div.append(" ");
+    const prettyA = add(div,"a")
+    prettyA.innerText="Pretty";
+    prettyA.href="ShowQuestion.html?question_id="+encodeURIComponent(user);
 }
 
 function updateQuestionList() {

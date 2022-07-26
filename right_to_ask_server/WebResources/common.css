@@ -3,6 +3,8 @@
     color: red;
 }
 
+/* Bulletin board css */
+
 span.PartOfChain {
     background: #fff0f0;
     border: 1px solid #ff9999;
@@ -42,4 +44,10 @@ blockquote {
 
 figcaption {
     font-style: italic;
+}
+
+/* Pretty printing CSS */
+
+div.QuestionText {
+    font-weight: bold;
 }
