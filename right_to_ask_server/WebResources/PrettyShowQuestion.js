@@ -11,7 +11,7 @@
 /**
  * Pretty display the question in the div
  * @param div An html DOM element to display in. Typically a div.
- * @param question Information on the question. In the format in the server QuestionInfo structure.
+ * @param question Information on the question. In the format in the server Result<QuestionInfo> structure.
  */
 function pretty_show_question(div,question) {
     console.log(question);
