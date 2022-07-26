@@ -62,21 +62,7 @@ function checkSimilarity() {
     getWebJSON("similar_questions",success,failurePending,JSON.stringify(command),"application/json");
 }
 
-function addEntry() {
-    let value_to_add = document.getElementById("entry").value;
-    function success(_result) {
-        document.getElementById("entry").value="";
-        checkSimilarity();
-        updateAllList();
-    }
-    const message = {
-        data : value_to_add
-    }
-    getWebJSON("submit_question",success,failure,JSON.stringify(message),"application/json")
-}
-
 window.onload = function () {
-    document.getElementById("AddEntry").onclick = addEntry;
     document.getElementById("entry").addEventListener("keyup",function(event) {
         if (event.key==="Enter") addEntry();
     });
