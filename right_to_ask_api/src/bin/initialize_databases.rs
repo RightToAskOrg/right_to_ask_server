@@ -1,9 +1,9 @@
-use std::future::Future;
 use std::path::Path;
 use right_to_ask_api::database::{get_rta_database_version, initialize_bulletin_board_database, initialize_right_to_ask_database, RTA_DATABASE_VERSION_REQUIRED};
 
-fn main() -> anyhow::Result<()> {
-    match get_rta_database_version() {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    match get_rta_database_version().await {
         Ok(version) => {
             println!("Current RTA database version {}. Required version {}",version,RTA_DATABASE_VERSION_REQUIRED);
         }
