@@ -96,7 +96,7 @@ fn parse_simple_a_committee(jurisdiction:Jurisdiction,selector:&str,html:&Html,b
     let selector = Selector::parse(selector).map_err(|e|anyhow!("Could not parse selector `{}` error {:?}",selector,e))?;
     let mut committee_type : Option<String> = None;
     for a in html.select(&selector) {
-        let name = a.text().next().unwrap_or("").trim().to_string();
+        let name = a.text().map(|s|s.trim()).filter(|s|!s.is_empty()).next().unwrap_or("").trim().to_string(); // Get first non-trivial block of text.
         if a.value().name()=="a" {
             let url = rel_url_from_a(base_url,&a)?;
             let committee = CommitteeInfo{ jurisdiction, name,url, committee_type: committee_type.clone()}; // TODO these URLs are often a 304 link to a prettier link.
@@ -236,13 +236,13 @@ fn parse_tas_joint_committees_html_file(path:&Path,base_url:&str) -> anyhow::Res
 
 fn parse_vic_committees_html_file(path:&Path,base_url:&str) -> anyhow::Result<Vec<CommitteeInfo>> {
     let html = scraper::Html::parse_document(&std::fs::read_to_string(path)?);
-    let parse = |jurisdiction:Jurisdiction,n:usize| {
-        let selector = format!("div#middle article ul:nth-child({}) > li > a:last-child",n);
+    let parse = |jurisdiction:Jurisdiction,div_id:&str| {
+        let selector = format!("div#{} a",div_id);
         parse_simple_a_committee(jurisdiction,&selector,&html,base_url,None).context(selector)
     };
-    let joint = parse(Jurisdiction::VIC,3)?;
-    let council = parse(Jurisdiction::Vic_Legislative_Council,5)?;
-    let assembly = parse(Jurisdiction::Vic_Legislative_Assembly,8)?; // Ugh! These numbers are very brittle.
+    let joint = parse(Jurisdiction::VIC,"panel-joint-committees")?;
+    let council = parse(Jurisdiction::Vic_Legislative_Council,"panel-lc-committees")?;
+    let assembly = parse(Jurisdiction::Vic_Legislative_Assembly,"panel-la-committees")?;
     Ok(vec![joint,council,assembly].into_iter().flatten().collect())
 }
 
