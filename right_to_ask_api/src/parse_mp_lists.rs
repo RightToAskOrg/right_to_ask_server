@@ -23,17 +23,20 @@ use std::str::FromStr;
 use anyhow::anyhow;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
+use std::io::Read;
 use scraper::Selector;
 use itertools::Itertools;
 use crate::parse_pdf_util::{parse_pdf_to_strings_with_same_font, extract_string};
 use regex::Regex;
 use calamine::{open_workbook, Xls, Reader, Xlsx};
+use encoding_rs_io::DecodeReaderBytesBuilder;
 use crate::parse_util::download_to_file;
 
 pub const MP_SOURCE : &'static str = "data/MP_source";
 
 fn parse_australian_senate(file : File) -> anyhow::Result<Vec<MP>> {
-    parse_csv(file, Chamber::Australian_Senate, "Surname", &["Preferred Name", "First Name"], None, Some("State"), &["Parliamentary Titles"],"Political Party")
+    let transcoded = DecodeReaderBytesBuilder::new().encoding(Some(encoding_rs::WINDOWS_1252)).build(file);
+    parse_csv(transcoded, Chamber::Australian_Senate, "Surname", &["Preferred Name", "First Name"], None, Some("State"), &["Parliamentary Titles"],"Political Party")
 }
 fn parse_australian_house_reps(file : File) -> anyhow::Result<(Vec<MP>,Vec<RegionContainingOtherRegions>)> {
     let (mps,states) = parse_csv_getting_extra(file, Chamber::Australian_House_Of_Representatives, "Surname", &["Preferred Name", "First Name"], None, Some("Electorate"), &["Parliamentary Title", "Ministerial Title"],"Political Party",Some("State"))?;
@@ -61,12 +64,12 @@ fn parse_vic_lc(file : File) -> anyhow::Result<Vec<MP>> {
 
 
 /// Parse a CSV file of contacts, given the headings
-fn parse_csv(file : File,chamber:Chamber,surname_heading:&str,first_name_heading:&[&str],email_heading:Option<&str>,electorate_heading:Option<&str>,role_heading:&[&str],party_heading:&str) -> anyhow::Result<Vec<MP>> {
+fn parse_csv<F:Read>(file : F,chamber:Chamber,surname_heading:&str,first_name_heading:&[&str],email_heading:Option<&str>,electorate_heading:Option<&str>,role_heading:&[&str],party_heading:&str) -> anyhow::Result<Vec<MP>> {
     parse_csv_getting_extra(file,chamber,surname_heading,first_name_heading,email_heading,electorate_heading,role_heading,party_heading,None).map(|(mps,_)|mps)
 }
 
 /// Parse a CSV file of MPs, given the headings, extracting them, and optionally an extra column specified by the `extra_heading` parameter.
-fn parse_csv_getting_extra(file : File,chamber:Chamber,surname_heading:&str,first_name_heading:&[&str],email_heading:Option<&str>,electorate_heading:Option<&str>,role_heading:&[&str],party_heading:&str,extra_heading:Option<&str>) -> anyhow::Result<(Vec<MP>,Vec<String>)> {
+fn parse_csv_getting_extra<F:Read>(file : F,chamber:Chamber,surname_heading:&str,first_name_heading:&[&str],email_heading:Option<&str>,electorate_heading:Option<&str>,role_heading:&[&str],party_heading:&str,extra_heading:Option<&str>) -> anyhow::Result<(Vec<MP>,Vec<String>)> {
     let mut reader = csv::Reader::from_reader(file);
     let mut mps = Vec::new();
     let mut extra_vec = Vec::new();
