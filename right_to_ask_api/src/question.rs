@@ -7,7 +7,7 @@
 // - TODO look for similar questions
 
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use std::fmt::{Debug, Display, Formatter};
 use serde::{Serialize, Deserialize};
@@ -464,7 +464,55 @@ impl QuestionNonDefiningFields {
         Ok(())
     }
 
+    /// Find questions that have matching metadata. Returns a map of questionID to number of matches.
+    /// NOTE THIS DOES NOT SCALE WELL. This is a temporary attempt until a long term approach is produced.
+    pub async fn find_similar_metadata(&self) -> Result<HashMap<QuestionID,u32>,QuestionError> {
+        let mut conn = get_rta_database_connection().await.map_err(internal_error)?;
+        let mut res : HashMap<QuestionID,u32> = HashMap::default();
+        for p in &self.mp_who_should_ask_the_question {
+            for q in QuestionNonDefiningFields::find_questions_by_person_in_role(&mut conn, "Q", p).map_err(internal_error)? {
+                *res.entry(q).or_insert(0)+=1;
+            }
+        }
+        for p in &self.entity_who_should_answer_the_question {
+            for q in QuestionNonDefiningFields::find_questions_by_person_in_role(&mut conn, "A", p).map_err(internal_error)? {
+                *res.entry(q).or_insert(0)+=1;
+            }
+        }
+        Ok(res)
+    }
+
+    /// get questions that have a given person in a given role (questioner or answerer)
+    fn find_questions_by_person_in_role(conn:&mut impl Queryable,role:&str,person:&PersonID) -> mysql::Result<Vec<QuestionID>> {
+        match person {
+            PersonID::User(who) => conn.exec_map("select QuestionId from PersonForQuestion where ROLE=? and UID=?",(role,who),|(v,)|hash_from_value(v)),
+            PersonID::MP(who) => {
+                if let Some(id) = who.get_id_from_database_if_there(conn)? {
+                    conn.exec_map("select QuestionId from PersonForQuestion where ROLE=? and MP=?",(role,id),|(v,)|hash_from_value(v))
+                } else {
+                    Ok(vec![])
+                }
+            },
+            PersonID::Organisation(who) => {
+                if let Some(id) = conn.exec_first::<usize,_,_>("select id from Organisations where OrgID=?",(who,))? {
+                    conn.exec_map("select QuestionId from PersonForQuestion where ROLE=? and ORG=?",(role,id),|(v,)|hash_from_value(v))
+                } else {
+                    Ok(vec![])
+                }
+            },
+            PersonID::Committee(who) => {
+                if let Some(id) = who.get_id_from_database_if_there(conn)? {
+                    //println!("Found committee with id {}",id);
+                    conn.exec_map("select QuestionId from PersonForQuestion where ROLE=? and Committee=?",(role,id),|(v,)|hash_from_value(v))
+                } else {
+                    //println!("Did not find committee with id {:?}",who);
+                    Ok(vec![])
+                }
+            },
+        }
+    }
 }
+
 /*************************************************************************
                        NEW QUESTION
  *************************************************************************/

@@ -10,7 +10,7 @@ use merkle_tree_bulletin_board::hash_history::{FullProof, HashInfo};
 use right_to_ask_api::censorship::{CensorQuestionCommand, QuestionHistory, ReportQuestionCommand};
 use right_to_ask_api::signing::{get_server_public_key_base64encoded, ServerSigned, get_server_public_key_raw_hex, get_server_public_key_raw_base64, ClientSigned};
 use right_to_ask_api::common_file::{COMMITTEES, HEARINGS, MPS};
-use right_to_ask_api::question::{EditQuestionCommand, NewQuestionCommand, QuestionID, QuestionInfo};
+use right_to_ask_api::question::{EditQuestionCommand, NewQuestionCommand, QuestionID, QuestionInfo, QuestionNonDefiningFields};
 use word_comparison::comparison_list::ScoredIDs;
 
 #[post("/new_registration")]
@@ -29,14 +29,25 @@ async fn edit_user(command : Json<ClientSigned<EditUserDetails>>) -> Json<Result
     }
 }
 
-async fn similar_questions_work(command:&NewQuestionCommand) -> anyhow::Result<Vec<ScoredIDs<QuestionID>>> {
-    let just_text = find_similar_text_question(&command.question_text).await?;
-    Ok(just_text) // TODO - add scores for metadata
+const SCORE_FOR_SINGLE_METADATA_MATCH : f64 = 20.0;
+
+async fn similar_questions_work(command:&NewQuestionCommand) -> Result<Vec<ScoredIDs<QuestionID>>,String> {
+    let just_text = find_similar_text_question(&command.question_text).await.map_err(|e|e.to_string())?;
+    let just_metadata  = QuestionNonDefiningFields::find_similar_metadata(&command.non_defining_fields).await.map_err(|e|e.to_string())?;
+    Ok(if just_metadata.is_empty() { just_text } else { // if no metadata matches, just use text matches
+        let mut unordered: Vec<ScoredIDs<QuestionID>> = if just_text.is_empty() { // if no text matches, just use metadata matches.
+            just_metadata.into_iter().map(|(q,n)|ScoredIDs{ id: q, score: SCORE_FOR_SINGLE_METADATA_MATCH*(n as f64) }).collect()
+        } else { // if both text and metadata matches, use just the ones with matching text, but add metadata scores.
+            just_text.into_iter().map(|s|ScoredIDs{ id:s.id, score:s.score+SCORE_FOR_SINGLE_METADATA_MATCH*(just_metadata.get(&s.id).cloned().unwrap_or(0) as f64)}).collect()
+        };
+        unordered.sort_by(|a,b|b.score.partial_cmp(&a.score).unwrap());
+        unordered
+    })
 }
 
 #[post("/similar_questions")]
 async fn similar_questions(command : Json<NewQuestionCommand>) -> Json<Result<Vec<ScoredIDs<QuestionID>>,String>> {
-    Json(similar_questions_work(&command).await.map_err(|e|e.to_string()))
+    Json(similar_questions_work(&command).await)
 }
 
 

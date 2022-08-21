@@ -59,16 +59,44 @@ function checkSimilarity() {
     }
     currently_pending_check_similarity=true;
     const command = {question_text:document.getElementById("entry").value};
+    function parseUsers(list,ui,tag) {
+        for (const s of document.getElementById(ui).value.split(',')) {
+            let ss = s.trim();
+            if (ss.length>0) {
+                let e = {};
+                e[tag]=ss;
+                list.push(e);
+            }
+        }
+    }
+    let askList = addMPsAskList.slice(); // make a shallow copy
+    for (const c of addCommitteesAskList) askList.push(c); // append committees.
+    let answerList = addMPsAnswerList.slice(); // make a shallow copu
+    parseUsers(askList,"AddUserAskList","User");
+    parseUsers(answerList,"AddUserAnswerList","User");
+    parseUsers(askList,"AddDomainAskList","Organisation");
+    parseUsers(answerList,"AddDomainAnswerList","Organisation");
+    if (askList.length>0) { command.mp_who_should_ask_the_question = askList; }
+    if (answerList.length>0) { command.entity_who_should_answer_the_question = answerList; }
     getWebJSON("similar_questions",success,failurePending,JSON.stringify(command),"application/json");
 }
 
+let addMPsAskList = [];
+let addCommitteesAskList = [];
+let addMPsAnswerList = [];
+
 window.onload = function () {
-    document.getElementById("entry").addEventListener("keyup",function(event) {
-        if (event.key==="Enter") addEntry();
-    });
     document.getElementById("entry").addEventListener("input",function(event) {
         checkSimilarity();
     });
+    getWebJSON("MPs.json",function (mpList) {
+        makePoliticianList("PoliticianAskList",mpList,function (mp) {addMPToList(mp,"AddMPAskList",addMPsAskList); checkSimilarity();});
+        makePoliticianList("PoliticianAnswerList",mpList,function (mp) {addMPToList(mp,"AddMPAnswerList",addMPsAnswerList); checkSimilarity();});
+    },failure);
+    getWebJSON("committees.json",function (committeeList) {
+        makeCommitteeList("CommitteeAskList",committeeList,function (committee) {addCommitteeToList(committee,"AddCommitteeAskList",addCommitteesAskList); checkSimilarity();});
+    },failure);
+
     updateAllList();
     checkSimilarity();
 }

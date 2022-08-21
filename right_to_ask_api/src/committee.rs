@@ -37,9 +37,14 @@ impl CommitteeId {
             None
         })
     }
+
+    /// given a Committee, get their id, should it exist.
+    pub fn get_id_from_database_if_there(&self,conn:&mut impl Queryable) -> mysql::Result<Option<CommitteeIndexInDatabaseTable>> {
+        conn.exec_first("select id from Committee_IDs where Jurisdiction=? and Name=?",(self.jurisdiction,&self.name))
+    }
     /// given an Committee, get their id, inserting a new one if it is not already there.
     pub fn get_id_from_database(&self,conn:&mut impl Queryable) -> mysql::Result<CommitteeIndexInDatabaseTable> {
-        if let Some(id) = conn.exec_first("select id from Committee_IDs where Jurisdiction=? and Name=?",(self.jurisdiction,&self.name))? {
+        if let Some(id) = self.get_id_from_database_if_there(conn)? {
             // it is already there.
             Ok(id)
         } else {

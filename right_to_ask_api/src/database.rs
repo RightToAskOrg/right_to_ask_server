@@ -14,7 +14,7 @@ use merkle_tree_bulletin_board::hash::HashValue;
 use mysql::prelude::Queryable;
 use crate::config::CONFIG;
 use crate::person::NewRegistration;
-use crate::question::{EditQuestionCommandPostedToBulletinBoard, hash_from_value, NewQuestionCommandPostedToBulletinBoard};
+use crate::question::{EditQuestionCommandPostedToBulletinBoard, hash_from_value, NewQuestionCommandPostedToBulletinBoard, QuestionID};
 use serde::{Serialize,Deserialize};
 use word_comparison::comparison_list::ScoredIDs;
 use word_comparison::database_backend::WordComparisonDatabaseBackend;
@@ -147,7 +147,7 @@ pub async fn remove_question_from_comparison_database(_id:HashValue) -> anyhow::
     Ok(())
 }
 
-pub async fn find_similar_text_question(question:&str) -> anyhow::Result<Vec<ScoredIDs<HashValue>>> {
+pub async fn find_similar_text_question(question:&str) -> anyhow::Result<Vec<ScoredIDs<QuestionID>>> {
     let mut backend =  WORD_COMPARISON_BACKEND.lock().await;
     word_comparison::comparison_list::find_similar_in_database(backend.deref_mut(),question,&GENERAL_VOCABULARY_WORDS,&LISTED_KEYWORDS)
 }

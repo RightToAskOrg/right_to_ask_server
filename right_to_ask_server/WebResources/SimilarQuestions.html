@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <link rel="stylesheet" href="common.css">
     <script src="util.js"></script>
+    <script src="common.js"></script>
+    <script src="PoliticianList.js"></script>
     <script src="SimilarQuestions.js"></script>
     <title>Question Similarity Demo</title>
 </head>
@@ -14,6 +16,20 @@
 <h2>Your new question</h2>
 
 <label for="entry">Question: </label><input type="text" id="entry" size="140"/>
+
+<h6>Who should ask the question</h6>
+<label for="AddUserAskList">Comma separated users: </label><input type="text" id="AddUserAskList"/><br/>
+<label for="AddDomainAskList">Comma separated domains: </label><input type="text" id="AddDomainAskList"/><br/>
+MP : <span id="AddMPAskList"></span><br/>
+<div id="PoliticianAskList"></div>
+Committee : <span id="AddCommitteeAskList"></span><br/>
+<div id="CommitteeAskList"></div>
+<h6>Who should answer the question</h6>
+<label for="AddUserAnswerList">Comma separated users: </label><input type="text" id="AddUserAnswerList"/><br/>
+<label for="AddDomainAnswerList">Comma separated domains: </label><input type="text" id="AddDomainAnswerList"/><br/>
+MP : <span id="AddMPAnswerList"></span><br/>
+<div id="PoliticianAnswerList"></div>
+
 
 <h3>Similar Questions</h3>
 <div id="SimilarQuestions"></div>

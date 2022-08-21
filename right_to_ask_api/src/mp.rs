@@ -77,9 +77,13 @@ impl MPId {
             None
         })
     }
+    /// given an MP, get their id, should it exist.
+    pub fn get_id_from_database_if_there(&self,conn:&mut impl Queryable) -> mysql::Result<Option<MPIndexInDatabaseTable>> {
+        conn.exec_first("select id from MP_IDs where Chamber=? and Electorate=? and FirstName=? and LastName=?",(self.electorate.chamber,&self.electorate.region,&self.first_name,&self.surname))
+    }
     /// given an MP, get their id, inserting a new one if it is not already there.
     pub fn get_id_from_database(&self,conn:&mut impl Queryable) -> mysql::Result<MPIndexInDatabaseTable> {
-        if let Some(id) = conn.exec_first("select id from MP_IDs where Chamber=? and Electorate=? and FirstName=? and LastName=?",(self.electorate.chamber,&self.electorate.region,&self.first_name,&self.surname))? {
+        if let Some(id) = self.get_id_from_database_if_there(conn)? {
             // it is already there.
             Ok(id)
         } else {

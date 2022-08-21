@@ -118,22 +118,6 @@ let addCommitteesAskList = [];
 let addMPsAnswerList = [];
 let actualAnswerer = null;
 
-function addMPToList(mp,ui,list) {
-    const span = document.getElementById(ui);
-    span.append(" "+mp_id_tostring(mp));
-    list.push({"MP":mp_id_of_mp(mp)});
-}
-function addCommitteeToList(committee,ui,list) {
-    const span = document.getElementById(ui);
-    span.append(" "+committee_id_tostring(committee));
-    list.push({"Committee":committee_id_of_committee(committee)});
-}
-
-
-function mp_id_tostring(mp) { return mp.first_name+" "+mp.surname+" ("+mp.electorate.chamber+(mp.electorate.region?(" "+mp.electorate.region):"")+")"; }
-function mp_id_of_mp(mp) { return {first_name : mp.first_name, surname: mp.surname, electorate : mp.electorate }; }
-function committee_id_tostring(committee) { return committee.name+" ("+committee.jurisdiction+")"; }
-function committee_id_of_committee(committee) { return {name : committee.name,jurisdiction : committee.jurisdiction }; }
 
 window.onload = function () {
     question_id = new URLSearchParams(window.location.search).get("question_id");
