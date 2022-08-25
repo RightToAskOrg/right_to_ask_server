@@ -156,6 +156,13 @@ async fn get_question_list() -> Json<Result<Vec<QuestionID>,String>> {
     Json(QuestionInfo::get_list_of_all_questions().await.map_err(|e|e.to_string()))
 }
 
+/// For testing only!
+#[get("/get_questions_created_by_user")]
+async fn get_questions_created_by_user(query:web::Query<QueryUser>) -> Json<Result<Vec<QuestionID>,String>> {
+    Json(QuestionInfo::get_questions_created_by_user(&query.uid).await.map_err(|e|e.to_string()))
+}
+
+
 // TODO put admin authentication on this
 #[post("/censor_question")]
 async fn censor_question(command : Json<CensorQuestionCommand>) -> Json<Result<HashValue,String>> {
@@ -314,6 +321,7 @@ async fn main() -> anyhow::Result<()> {
             .service(get_user_list)
             .service(get_user)
             .service(get_question_list)
+            .service(get_questions_created_by_user)
             .service(get_question)
             .service(get_question_history)
             .service(censor_question)

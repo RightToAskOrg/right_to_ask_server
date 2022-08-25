@@ -690,6 +690,14 @@ impl QuestionInfo {
         let elements : Vec<QuestionID> = conn.exec_map("SELECT QuestionID from QUESTIONS ORDER BY LastModifiedTimestamp DESC",(),|(v,)|hash_from_value(v))?;
         Ok(elements)
     }
+
+    /// Get all questions from a particular user.
+    pub async fn get_questions_created_by_user(uid:&str) -> mysql::Result<Vec<QuestionID>> {
+        let mut conn = get_rta_database_connection().await?;
+        let elements : Vec<QuestionID> = conn.exec_map("SELECT QuestionID from QUESTIONS where CreatedBy=? ORDER BY LastModifiedTimestamp DESC",(uid,),|(v,)|hash_from_value(v))?;
+        Ok(elements)
+    }
+
 }
 
 

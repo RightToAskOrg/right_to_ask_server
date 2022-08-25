@@ -8,6 +8,10 @@ function showUser(div,user) {
     const editA = add(div,"a")
     editA.innerText="Edit";
     editA.href="EditUser.html?uid="+encodeURIComponent(user);
+    div.append(" ");
+    const qA = add(div,"a")
+    qA.innerText="Questions authored";
+    qA.href="get_questions_created_by_user?uid="+encodeURIComponent(user);
 }
 function updateUserList() {
     function success(data) {
