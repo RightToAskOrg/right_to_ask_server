@@ -47,6 +47,8 @@ pub enum QuestionError {
     SameQuestionSubmittedRecently,
     OnlyAuthorCanChangeBackground,
     OnlyAuthorCanChangePermissions,
+    OnlyAuthorCanAcceptAnswer,
+    CantAcceptAnswerIfNonePresent,
     CanOnlyExtendBackground,
     FollowUpIsNotAValidQuestion,
     FollowUpIsAlreadySet,
@@ -341,7 +343,7 @@ impl QuestionAnswer {
     /// Add a given answer to the database.
     fn add_for_question(&self,conn:&mut impl Queryable,question:QuestionID,timestamp:Timestamp,uid:&UserUID,version:HashValue) -> mysql::Result<()> {
         let mp = self.mp.get_id_from_database(conn)?;
-        conn.exec_drop("insert into Answer (QuestionId,author,mp,timestamp,answer,version) values (?,?,?,?,?)",(&question.0,uid,mp,timestamp,&self.answer,&version.0))?;
+        conn.exec_drop("insert into Answer (QuestionId,author,mp,timestamp,answer,version) values (?,?,?,?,?,?)",(&question.0,uid,mp,timestamp,&self.answer,&version.0))?;
         Ok(())
     }
 
@@ -420,7 +422,15 @@ impl QuestionNonDefiningFields {
             let mut conn = get_rta_database_connection().await.map_err(internal_error)?;
             for e in extra { e.check_sane(&mut conn)? }
         }
-        // TODO check answer_accepted and hansard_link.
+        if self.answer_accepted {
+            if let Some(existing) = existing {
+                if !existing.non_defining.answer_accepted {
+                    if !is_creator { return Err(QuestionError::OnlyAuthorCanAcceptAnswer); }
+                    if !existing.non_defining.answers.is_empty() { return Err(QuestionError::CantAcceptAnswerIfNonePresent)}
+                }
+            } else { return Err(QuestionError::CantAcceptAnswerIfNonePresent)}
+        }
+        // TODO check hansard_link.
         Ok(())
     }
 
@@ -459,7 +469,11 @@ impl QuestionNonDefiningFields {
         for a in &self.answers {
             a.add_for_question(&mut transaction,question_id,timestamp,uid,new_version).map_err(internal_error)?;
         }
-        // TODO insert answer_accepted and hansard_link.
+        if self.answer_accepted {
+            // There could be optimization here checking if it was already set.
+            transaction.exec_drop("update QUESTIONS set AnswerAccepted=true where QuestionID=?", (question_id.0,)).map_err(internal_error)?;
+        }
+        // TODO insert hansard_link.
         transaction.commit().map_err(internal_error)?;
         Ok(())
     }
