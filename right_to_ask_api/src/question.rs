@@ -15,7 +15,9 @@ use merkle_tree_bulletin_board::hash::HashValue;
 use merkle_tree_bulletin_board::hash_history::{Timestamp, timestamp_now};
 use mysql::prelude::Queryable;
 use mysql::{Transaction, TxOpts};
+use reqwest::Url;
 use sha2::{Digest, Sha256};
+use url::Host;
 use crate::committee::{CommitteeId, CommitteeIndexInDatabaseTable};
 use crate::common_file::COMMITTEES;
 use crate::database::{add_question_to_comparison_database, get_rta_database_connection, LogInBulletinBoard};
@@ -72,6 +74,9 @@ pub enum QuestionError {
     BulletinBoardHistoryIsCorrupt,
     /// Trying to report or censor an answer that is either not an answer to the question or is already censored.
     NotAnUncensoredAnswer,
+    HansardLinkIsNotURL,
+    /// The Hansard link URL does not satisfy the sanitization filters.
+    HansardLinkIsNotAllowed,
 }
 
 impl Display for QuestionError {
@@ -365,6 +370,20 @@ pub struct HansardLink {
     pub url : String, // Should this be more structured?
 }
 
+impl HansardLink {
+    /// Return OK if this seems like a safe URL.
+    fn check_ok(&self) -> Result<(),QuestionError> {
+        let url = Url::parse(&self.url).map_err(|_|QuestionError::HansardLinkIsNotURL)?;
+        if let Some(Host::Domain(host)) = url.host() {
+            println!("Should sanitize {} but did not know how to",host);
+            // TODO sanitize hosts
+            if host=="evil.com" { return Err(QuestionError::HansardLinkIsNotAllowed)}
+            Ok(())
+        } else { return Err(QuestionError::HansardLinkIsNotURL) }
+    }
+
+}
+
 /// Any modification to the question database will have to
 ///  * Check that the database version is the expected version.
 ///  * modify the version and last updated timestamp.
@@ -430,7 +449,12 @@ impl QuestionNonDefiningFields {
                 }
             } else { return Err(QuestionError::CantAcceptAnswerIfNonePresent)}
         }
-        // TODO check hansard_link.
+
+        if !self.hansard_link.is_empty() {
+            for link in &self.hansard_link {
+                link.check_ok()?;
+            }
+        }
         Ok(())
     }
 
@@ -473,7 +497,13 @@ impl QuestionNonDefiningFields {
             // There could be optimization here checking if it was already set.
             transaction.exec_drop("update QUESTIONS set AnswerAccepted=true where QuestionID=?", (question_id.0,)).map_err(internal_error)?;
         }
-        // TODO insert hansard_link.
+        if !self.hansard_link.is_empty() {
+            // TODO remove duplicates.
+            for link in &self.hansard_link {
+                println!("Server should have stored Hansard link {} but didn't",link.url)
+                // TODO insert hansard_link.
+            }
+        }
         transaction.commit().map_err(internal_error)?;
         Ok(())
     }
