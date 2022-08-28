@@ -55,6 +55,17 @@ function editQuestion() {
             return;
         }
     }
+    let links = document.getElementById("ExtraLink").value;
+    if (links.length>0) {
+        command.hansard_link = [];
+        for (const l of links.split(/\r?\n/))  {
+            const url=l.trim();
+            if (url.length>0) {
+                command.hansard_link.push({url:url});
+            }
+        }
+    }
+
     let signed_message = sign_message(command);
     getWebJSON("edit_question",success,failure,JSON.stringify(signed_message),"application/json")
 }
@@ -100,7 +111,16 @@ function setQuestion(questionInfo) {
             add(figure,"blockquote").innerText=answer.answer;
             add(figure,"figcaption").innerText=answer.answered_by+" wearing hat as "+mp_id_tostring(answer.mp)+" time "+answer.timestamp;
         }
+        const linkDiv = document.getElementById("HansardLinks");
+        removeAllChildElements(linkDiv);
+        if (question.hansard_link) for (const hl of question.hansard_link) {
+            const a = add(linkDiv,"a");
+            a.innerText=hl.url;
+            a.href=hl.url;
+            add(linkDiv,"br");
+        }
         document.getElementById("Answer").value="";
+        document.getElementById("ExtraLink").value="";
         document.getElementById("NewAnswerMP").innerText="";
         addMPsAskList = [];
         addCommitteesAskList = [];

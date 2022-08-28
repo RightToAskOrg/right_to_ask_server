@@ -24,7 +24,7 @@ use word_comparison::word_file::{WORD_MMAP_FILE, WordsInFile};
 use crate::censorship::{CensorQuestionCommandPostedToBulletinBoard, ReportQuestionCommandPostedToBulletinBoard};
 use crate::signing::ClientSignedUnparsed;
 
-pub const RTA_DATABASE_VERSION_REQUIRED : usize = 3;
+pub const RTA_DATABASE_VERSION_REQUIRED : usize = 4;
 
 
 fn get_rta_database_pool_raw() -> Pool {
@@ -103,8 +103,8 @@ pub fn initialize_bulletin_board_database() -> anyhow::Result<()> {
 }
 
 /// List of all the versions of the RTA schema for which an incremental upgrade can be done automatically by running a SQL script.
-const UPGRADABLE_VERSIONS: [(usize, &'static str);1] = [
-    (3,include_str!("RTASchemaUpdates/3.sql"))
+const UPGRADABLE_VERSIONS: [(usize, &'static str);2] = [
+    (3,include_str!("RTASchemaUpdates/3.sql")),(4,include_str!("RTASchemaUpdates/4.sql"))
 ];
 
 pub fn upgrade_right_to_ask_database(current_version:usize) -> anyhow::Result<()> {

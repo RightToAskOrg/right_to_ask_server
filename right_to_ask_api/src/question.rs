@@ -4,7 +4,6 @@
 // - submit New Question
 // - edit existing question
 // - look up current info on a specific question.
-// - TODO look for similar questions
 
 
 use std::collections::{HashMap, HashSet};
@@ -365,21 +364,32 @@ impl QuestionAnswer {
 
 }
 ///  domain must be aph.gov.au, parliament.vic.gov.au, etc. (preloaded permit-list - note that url sanitation is nontrivial).
-#[derive(Serialize,Deserialize,Debug,Clone)]
+#[derive(Serialize,Deserialize,Debug,Clone,Eq, PartialEq,Hash)]
 pub struct HansardLink {
     pub url : String, // Should this be more structured?
 }
+
+/// A list of all hosts that can be linked to by the Hansard Link.
+const ALLOWED_HOSTS: [&'static str; 1] = ["www.aph.gov.au"]; // TODO - add a full list, and remove the println a few lines below.
 
 impl HansardLink {
     /// Return OK if this seems like a safe URL.
     fn check_ok(&self) -> Result<(),QuestionError> {
         let url = Url::parse(&self.url).map_err(|_|QuestionError::HansardLinkIsNotURL)?;
         if let Some(Host::Domain(host)) = url.host() {
-            println!("Should sanitize {} but did not know how to",host);
-            // TODO sanitize hosts
-            if host=="evil.com" { return Err(QuestionError::HansardLinkIsNotAllowed)}
+            println!("Should sanitize {} but do not have a full list",host);
+            if !ALLOWED_HOSTS.iter().any(|&h|h==host) { return Err(QuestionError::HansardLinkIsNotAllowed)}
             Ok(())
         } else { return Err(QuestionError::HansardLinkIsNotURL) }
+    }
+
+    /// Get the links for a question.
+    fn get_for_question(conn:&mut impl Queryable,question:QuestionID) -> mysql::Result<Vec<HansardLink>> {
+        conn.exec_map("SELECT url from HansardLink where QuestionId=?",(&question.0,),|url|HansardLink{url})
+    }
+    /// Add the given links to a given question.
+    fn add_for_question(conn:&mut impl Queryable,question:QuestionID,links:&[&HansardLink]) -> mysql::Result<()> {
+        conn.exec_batch("insert into HansardLink (QuestionId,url) values (?,?)",links.iter().map(|link|(question.0,&link.url)))
     }
 
 }
@@ -498,10 +508,11 @@ impl QuestionNonDefiningFields {
             transaction.exec_drop("update QUESTIONS set AnswerAccepted=true where QuestionID=?", (question_id.0,)).map_err(internal_error)?;
         }
         if !self.hansard_link.is_empty() {
-            // TODO remove duplicates.
-            for link in &self.hansard_link {
-                println!("Server should have stored Hansard link {} but didn't",link.url)
-                // TODO insert hansard_link.
+            // remove duplicates
+            let existing = HansardLink::get_for_question(&mut transaction,question_id).map_err(internal_error)?.into_iter().collect::<HashSet<_>>();
+            let extra : Vec<_> = self.hansard_link.iter().filter(|&m|!existing.contains(m)).collect();
+            if !extra.is_empty() {
+                HansardLink::add_for_question(&mut transaction,question_id,&extra).map_err(internal_error)?;
             }
         }
         transaction.commit().map_err(internal_error)?;
@@ -716,7 +727,7 @@ impl QuestionInfo {
                             who_should_answer_the_question_permissions: if who_should_answer_the_question_permissions { Permissions::Others } else { Permissions::WriterOnly } ,
                             answers: QuestionAnswer::get_for_question(&mut conn,question_id).map_err(internal_error)?,
                             answer_accepted,
-                            hansard_link: vec![], // TODO
+                            hansard_link: HansardLink::get_for_question(&mut conn,question_id).map_err(internal_error)?,
                             is_followup_to : opt_hash_from_value(is_followup_to),
                         },
                         question_id,

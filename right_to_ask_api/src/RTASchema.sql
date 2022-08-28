@@ -146,11 +146,17 @@ create table if not exists Answer
     INDEX(MP)
 ) CHARACTER SET utf8;
 
+create table HansardLink
+(
+    QuestionId  BINARY(32), /* reference to QuestionID in QUESTIONS table */
+    url         TEXT, /* The URL */
+    INDEX(QuestionId)
+) CHARACTER SET utf8;
 
 create table SchemaVersion
 (
     version INT
 );
 
-insert into SchemaVersion (version) values (3);
+insert into SchemaVersion (version) values (4);
 
