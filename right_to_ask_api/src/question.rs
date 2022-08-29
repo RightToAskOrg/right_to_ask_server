@@ -370,14 +370,21 @@ pub struct HansardLink {
 }
 
 /// A list of all hosts that can be linked to by the Hansard Link.
-const ALLOWED_HOSTS: [&'static str; 1] = ["www.aph.gov.au"]; // TODO - add a full list, and remove the println a few lines below.
+const ALLOWED_HOSTS: [&'static str; 9] = ["www.aph.gov.au",
+"parliament.act.gov.au",
+"parliament.nsw.gov.au",
+"parliament.nt.gov.au",
+"parliament.qld.gov.au",
+"parliament.sa.gov.au",
+"parliament.tas.gov.au",
+"parliament.vic.gov.au",
+"parliament.wa.gov.au"];
 
 impl HansardLink {
     /// Return OK if this seems like a safe URL.
     fn check_ok(&self) -> Result<(),QuestionError> {
         let url = Url::parse(&self.url).map_err(|_|QuestionError::HansardLinkIsNotURL)?;
         if let Some(Host::Domain(host)) = url.host() {
-            println!("Should sanitize {} but do not have a full list",host);
             if !ALLOWED_HOSTS.iter().any(|&h|h==host) { return Err(QuestionError::HansardLinkIsNotAllowed)}
             Ok(())
         } else { return Err(QuestionError::HansardLinkIsNotURL) }
