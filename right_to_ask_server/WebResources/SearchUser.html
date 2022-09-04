@@ -1,0 +1,30 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="common.css">
+    <script src="util.js"></script>
+    <script src="common.js"></script>
+    <script src="signing.js"></script>
+    <script src="SearchUser.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tweetnacl/1.0.3/nacl-fast.min.js"></script>
+    <title>Search for User</title>
+</head>
+<body>
+
+<p>Note: This is not for production use. It is for testing purposes only.</p>
+<label for="Query">Query: </label><input type="text" id="Query"/><br/>
+<div>
+    <table>
+        <thead>
+          <tr><th>UID</th><th>DisplayName</th><th>Badges</th></tr>
+        </thead>
+        <tbody id="QueryResult">
+
+        </tbody>
+    </table>
+</div>
+
+</body>
+</html>

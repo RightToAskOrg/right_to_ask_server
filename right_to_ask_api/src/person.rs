@@ -82,6 +82,16 @@ pub struct UserInfo {
 }
 
 #[derive(Debug,Clone,Serialize,Deserialize,Eq,PartialEq)]
+/// Like UserInfo, but less info. For searches.
+pub struct MiniUserInfo {
+    uid : UserUID,
+    #[serde(default,skip_serializing_if = "Option::is_none")]
+    display_name : Option<String>,
+    #[serde(default,skip_serializing_if = "Vec::is_empty")]
+    badges : Vec<Badge>,
+}
+
+#[derive(Debug,Clone,Serialize,Deserialize,Eq,PartialEq)]
 /// What a badge represents.
 pub enum BadgeType {
     EmailDomain,
@@ -224,6 +234,21 @@ pub async fn get_user_by_id(uid:&UserUID) -> mysql::Result<Option<UserInfo>> {
             badges
         }))
     } else {Ok(None)}
+}
+
+/// Make a list of users who have a search string as a subset of their UID or DisplayName (case insensitive).
+/// want_badges says whether badges are wanted as well (significantly more expensive).
+pub async fn search_for_users(search:&str,want_badges:bool) -> mysql::Result<Vec<MiniUserInfo>> {
+    let mut conn = get_rta_database_connection().await?;
+    let query = "%".to_string()+&search.replace('!',"!!").replace('_',"!_").replace('%',"!%").replace('[',"![").to_uppercase()+"%";
+    let mut res : Vec<MiniUserInfo> = conn.exec_map("SELECT UID,DisplayName from USERS where (UPPER(UID) like ? escape '!') or (UPPER(DisplayName) like ? escape '!')",(&query,&query),|(uid,display_name)|MiniUserInfo{uid,display_name,badges:vec![] })?;
+    if want_badges {
+        for user in &mut res {
+            let badges = conn.exec_map("SELECT badge,what from BADGES where UID=?",(&user.uid,),|(badge,name)|Badge{ badge, name })?;
+            user.badges=badges;
+        }
+    }
+    Ok(res)
 }
 
 pub async fn is_user_mp_or_staffer(uid:&UserUID) -> mysql::Result<bool> {

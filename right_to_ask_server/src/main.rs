@@ -3,7 +3,7 @@ use actix_web::{HttpServer, middleware, web};
 use actix_web::{get, post};
 use std::path::PathBuf;
 use actix_web::web::Json;
-use right_to_ask_api::person::{NewRegistration, get_list_of_all_users, get_count_of_all_users, UserInfo, get_user_by_id, RequestEmailValidation, EmailProof, EmailAddress, EditUserDetails};
+use right_to_ask_api::person::{NewRegistration, get_list_of_all_users, get_count_of_all_users, UserInfo, get_user_by_id, RequestEmailValidation, EmailProof, EmailAddress, EditUserDetails, MiniUserInfo, search_for_users};
 use merkle_tree_bulletin_board::hash::HashValue;
 use right_to_ask_api::database::{check_rta_database_version_current, find_similar_text_question, get_bulletin_board};
 use merkle_tree_bulletin_board::hash_history::{FullProof, HashInfo};
@@ -130,9 +130,21 @@ async fn get_user_list() -> Json<Result<Vec<String>,String>> {
 struct QueryUser {
     uid : String,
 }
+#[derive(serde::Deserialize)]
+struct SearchUser {
+    search : String,
+    #[serde(default)]
+    badges : bool,
+}
 #[get("/get_user")]
 async fn get_user(query:web::Query<QueryUser>) -> Json<Result<Option<UserInfo>,String>> {
     Json(get_user_by_id(&query.uid).await.map_err(|e|e.to_string()))
+}
+
+
+#[get("/search_user")]
+async fn search_user(query:web::Query<SearchUser>) -> Json<Result<Vec<MiniUserInfo>,String>> {
+    Json(search_for_users(&query.search,query.badges).await.map_err(|e|e.to_string()))
 }
 
 #[derive(serde::Deserialize)]
@@ -150,13 +162,13 @@ async fn get_question_history(query:web::Query<QueryQuestion>) -> Json<Result<Qu
 }
 
 
+
 /// For testing only!
 #[get("/get_question_list")]
 async fn get_question_list() -> Json<Result<Vec<QuestionID>,String>> {
     Json(QuestionInfo::get_list_of_all_questions().await.map_err(|e|e.to_string()))
 }
 
-/// For testing only!
 #[get("/get_questions_created_by_user")]
 async fn get_questions_created_by_user(query:web::Query<QueryUser>) -> Json<Result<Vec<QuestionID>,String>> {
     Json(QuestionInfo::get_questions_created_by_user(&query.uid).await.map_err(|e|e.to_string()))
@@ -320,6 +332,7 @@ async fn main() -> anyhow::Result<()> {
             .service(edit_question)
             .service(get_user_list)
             .service(get_user)
+            .service(search_user)
             .service(get_question_list)
             .service(get_questions_created_by_user)
             .service(get_question)
