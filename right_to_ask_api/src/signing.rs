@@ -9,7 +9,7 @@ use ed25519_dalek::ed25519::signature::Signature;
 use serde::{Serialize,Deserialize};
 use crate::config::CONFIG;
 use pkcs8::{PrivateKeyInfo, SubjectPublicKeyInfo};
-use pkcs8::der::Decodable;
+use pkcs8::der::Decode;
 use serde::de::DeserializeOwned;
 use crate::person::get_user_public_key_by_id;
 

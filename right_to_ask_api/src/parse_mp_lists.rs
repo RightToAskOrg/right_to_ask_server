@@ -369,6 +369,8 @@ fn parse_nt_la_pdf(path:&Path) -> anyhow::Result<Vec<MP>> {
                     //println!("Looking for electorate {}",lower_case_electorate);
                     for h in &history {
                         let h = h.trim();
+                        // Ministries are all concatenated together at this point.
+                        // println!("history {}",h);
                         let mut lower_case_and_without_whitespace = h.to_lowercase();
                         lower_case_and_without_whitespace.retain(|c| !c.is_whitespace());
                         if lower_case_and_without_whitespace.starts_with(lower_case_electorate) {
@@ -381,7 +383,21 @@ fn parse_nt_la_pdf(path:&Path) -> anyhow::Result<Vec<MP>> {
                                 h.chars().take_while(|c|!c.is_whitespace()).collect() // probably Independent, but maybe something else...
                             });
                             break;
-                        } else if h.len()>0 { roles.push(h.to_string() )}
+                        } else if h.len()>0 {
+                            // h will be a space separated list of roles, most of which will be "Minister for xxx".
+                            let mut togo = h;
+                            let mut roles_here : Vec<&str> = vec![];
+                            while togo.len()>0 {
+                                if let Some(pos) = togo.rfind("Minister for") {
+                                    let (left,right) = togo.split_at(pos);
+                                    if left.ends_with(" and ") { roles_here.push(togo ); break } // special case for "Attorney-General and Minister for Justice"
+                                    else { roles_here.push(right ); togo=left; }
+                                } else { roles_here.push(togo ); break  }
+                            }
+                            for role in roles_here.into_iter().rev() {
+                                roles.push(role.trim().to_string() )
+                            }
+                        }
                     }
                 } else {
                     let (surname,first_name) = found_name.take().unwrap();
