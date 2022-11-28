@@ -510,7 +510,7 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     let dir = PathBuf::from_str(MP_SOURCE)?;
 
     // NT
-    let nt_members = download_to_file("https://parliament.nt.gov.au/__data/assets/pdf_file/0004/932971/MASTER-List-of-Members-Fourteenth-Assembly-as-at-August-2022.pdf").await?;
+    let nt_members = download_to_file("https://parliament.nt.gov.au/__data/assets/pdf_file/0004/932971/MASTER-List-of-Members-Fourteenth-Assembly-as-at-October-2022.pdf").await?;
     parse_nt_la_pdf(nt_members.path())?;
     nt_members.persist(dir.join(Chamber::NT_Legislative_Assembly.to_string()+".pdf"))?;
 
