@@ -62,7 +62,8 @@ fn parse_hearings_main_html_file(path:&Path,base_url:&str) -> anyhow::Result<Vec
             let committee_url = rel_url_from_a(base_url,&committee_a)?;
             let chamber = tds[4].text().next().unwrap_or("").trim().to_string();
             let location = tds[5].text().next().unwrap_or("").trim().to_string();
-            let program_url = rel_url_from_a(base_url,&(tds[6].select(&select_a).next().ok_or_else(||anyhow!("Could not find a in program column in main hearings html file"))?))?;
+            let program_a = tds[6].select(&select_a).next();
+            let program_url = if let Some(a) = program_a { rel_url_from_a(base_url,&a)? } else { None };
             let hearing = UpcomingHearing{
                 date_short,
                 date_long,
