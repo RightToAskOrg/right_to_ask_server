@@ -1,10 +1,11 @@
 //! A description of committees that may be sensible targets for "who ta ask a question"
+//! Note that this is very similar to minister.rs
 
 use mysql::prelude::Queryable;
 use serde::{Serialize, Deserialize};
 use crate::regions::Jurisdiction;
 
-/// An identifier for a committee at some point in time. Analagous to [MPId]
+/// An identifier for a committee at some point in time. Analogous to [MPId]
 #[derive(Serialize,Deserialize,Clone,Debug,Eq,PartialEq,Hash)]
 pub struct CommitteeId {
     pub jurisdiction : Jurisdiction,

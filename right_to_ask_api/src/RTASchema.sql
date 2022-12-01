@@ -3,8 +3,11 @@ drop table if exists USERS;
 drop table if exists ELECTORATES;
 drop table if exists BADGES;
 drop table if exists QUESTIONS;
+drop table if exists HAS_VOTED;
 drop table if exists MP_IDs;
 drop table if exists Organisations;
+drop table if exists Committee_IDs;
+drop table if exists Minister_IDs;
 drop table if exists PersonForQuestion;
 drop table if exists Answer;
 
@@ -60,8 +63,18 @@ create table if not exists QUESTIONS
     AnswerAccepted  BOOLEAN NOT NULL,
     FollowUpTo  BINARY(32) NULL,
     censored BOOLEAN NOT NULL DEFAULT FALSE,
+    TotalVotes  INT NOT NULL DEFAULT 0,
+    NetVotes    INT NOT NULL DEFAULT 0,
     INDEX(LastModifiedTimestamp),
     INDEX(CreatedBy)
+) CHARACTER SET utf8;
+
+create table if not exists HAS_VOTED
+(
+    QuestionId  BINARY(32) NOT NULL, /* The hash of the question defining fields */
+    Voter       VARCHAR(30) NOT NULL, /* reference to UID in Users table */
+    INDEX(QuestionId),
+    INDEX(Voter)
 ) CHARACTER SET utf8;
 
 create table if not exists MP_IDs(
@@ -115,6 +128,31 @@ create table if not exists Committee_IDs(
     INDEX(Name(30))
 ) CHARACTER SET utf8;
 
+
+create table if not exists Minister_IDs(
+                                            id INT PRIMARY KEY NOT NULL AUTO_INCREMENT,
+                                            Jurisdiction     ENUM('ACT_Legislative_Assembly',
+                                                'Australian_House_Of_Representatives',
+                                                'Australian_Senate',
+                                                'NSW_Legislative_Assembly',
+                                                'NSW_Legislative_Council',
+                                                'NT_Legislative_Assembly',
+                                                'Qld_Legislative_Assembly',
+                                                'SA_House_Of_Assembly',
+                                                'SA_Legislative_Council',
+                                                'Vic_Legislative_Assembly',
+                                                'Vic_Legislative_Council',
+                                                'Tas_House_Of_Assembly',
+                                                'Tas_Legislative_Council',
+                                                'WA_Legislative_Assembly',
+                                                'WA_Legislative_Council',
+                                                'ACT','NSW','NT','QLD','SA','TAS','VIC','WA',
+                                                'Federal') NOT NULL,
+                                            Name   TEXT NOT NULL,
+                                            INDEX(Jurisdiction),
+                                            INDEX(Name(30))
+) CHARACTER SET utf8;
+
 create table if not exists Organisations(
     id INT PRIMARY KEY NOT NULL AUTO_INCREMENT,
     OrgID TEXT NOT NULL,
@@ -129,6 +167,7 @@ create table if not exists PersonForQuestion
     MP INT NULL, /* reference to an MP in MP_IDs table, if it is an MP */
     ORG INT NULL, /* reference to an organisation in Organisations table, if it is an organisation */
     Committee INT NULL, /* reference to a committee in Committee_IDs table, if it is a committee */
+    Minister INT NULL, /* reference to a minister in Minister_IDs table, if it is a minister */
     INDEX(QuestionId)
 ) CHARACTER SET utf8;
 
@@ -158,5 +197,5 @@ create table SchemaVersion
     version INT
 );
 
-insert into SchemaVersion (version) values (4);
+insert into SchemaVersion (version) values (5);
 

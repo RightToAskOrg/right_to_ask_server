@@ -7,8 +7,10 @@ pub use crate::parse_mp_lists::{update_mp_list_of_files,create_mp_list};
 use serde::{Serialize,Deserialize};
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
+use itertools::Itertools;
 use mysql::prelude::Queryable;
 use crate::common_file::MPS;
+use crate::minister::MinisterId;
 use crate::question::OrgID;
 
 /// Information about a MP (or other human elected representative, e.g. senator).
@@ -29,6 +31,11 @@ impl MP {
     /// This is `FirstName surname @emaildomain`
     pub fn badge_name(&self) -> String {
         self.first_name.to_string()+" "+&self.surname+" "+self.email.trim_start_matches(|c|c!='@')
+    }
+    /// See if this minister is compatible with this role.
+    pub fn is_in_role(&self,role:&MinisterId) -> bool {
+        role.jurisdiction.compatible_with(self.electorate.chamber) &&
+        self.role.split(';').map(|s|s.trim()).contains(&role.name.as_str())
     }
 }
 

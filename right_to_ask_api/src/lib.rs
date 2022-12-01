@@ -13,6 +13,7 @@ mod parse_util;
 pub mod committee;
 pub mod common_file;
 pub mod censorship;
+pub mod minister;
 
 #[cfg(test)]
 mod tests {

@@ -20,6 +20,7 @@ use url::Host;
 use crate::committee::{CommitteeId, CommitteeIndexInDatabaseTable};
 use crate::common_file::COMMITTEES;
 use crate::database::{add_question_to_comparison_database, get_rta_database_connection, LogInBulletinBoard};
+use crate::minister::{MinisterId, MinisterIndexInDatabaseTable};
 use crate::mp::{get_org_id_from_database, MPId, MPIndexInDatabaseTable, MPSpec, OrgIndexInDatabaseTable};
 use crate::person::{user_exists, UserUID};
 use crate::signing::ClientSigned;
@@ -64,6 +65,8 @@ pub enum QuestionError {
     InvalidMP,
     /// The provided Committee is not one we recognise.
     InvalidCommittee,
+    /// The provided Minister is not one we recognise.
+    InvalidMinister,
     /// The user to ask/answer the question does not exist.
     InvalidUserSpecified,
     /// The question exists, but was censored.
@@ -76,6 +79,7 @@ pub enum QuestionError {
     HansardLinkIsNotURL,
     /// The Hansard link URL does not satisfy the sanitization filters.
     HansardLinkIsNotAllowed,
+    AlreadyVoted,
 }
 
 impl Display for QuestionError {
@@ -158,14 +162,15 @@ pub enum PersonID {
     MP(MPId),
     Organisation(OrgID),
     Committee(CommitteeId),
+    Minister(MinisterId),
 }
 
 impl PersonID {
     /// Get the people who should ask (role='Q') or answer (role='A') a question.
     fn get_for_question(conn:&mut impl Queryable,role:char,question:QuestionID) -> mysql::Result<Vec<PersonID>> {
-        let elements : Vec<(Option<UserUID>,Option<MPIndexInDatabaseTable>,Option<OrgIndexInDatabaseTable>,Option<CommitteeIndexInDatabaseTable>)> = conn.exec_map("SELECT UID,MP,ORG,Committee from PersonForQuestion where QuestionId=? and ROLE=?",(&question.0,role.to_string()),|(uid,mp,org,committee)|(uid,mp,org,committee))?;
+        let elements : Vec<(Option<UserUID>,Option<MPIndexInDatabaseTable>,Option<OrgIndexInDatabaseTable>,Option<CommitteeIndexInDatabaseTable>,Option<MinisterIndexInDatabaseTable>)> = conn.exec_map("SELECT UID,MP,ORG,Committee,Minister from PersonForQuestion where QuestionId=? and ROLE=?",(&question.0,role.to_string()),|(uid,mp,org,committee,minister)|(uid,mp,org,committee,minister))?;
         let mut res = vec![];
-        for (uid,mp,org,committee) in elements {
+        for (uid,mp,org,committee,minister) in elements {
             let decoded = {
                 if let Some(uid) = uid { PersonID::User(uid) }
                 else if let Some(mp) = mp { // we may want to cache this for performance.
@@ -189,6 +194,13 @@ impl PersonID {
                         eprintln!("Missing organisation {} for question {} role {}",org,question,role);
                         continue;
                     }
+                } else if let Some(minister) = minister { // we may want to cache this for performance.
+                    if let Some(minister_id) = MinisterId::read_from_database(conn,minister)? {
+                        PersonID::Minister(minister_id)
+                    } else {
+                        eprintln!("Missing minister {} for question {} role {}",minister,question,role);
+                        continue;
+                    }
                 } else {
                     eprintln!("Blank person for question {} role {}",question,role);
                     continue;
@@ -200,28 +212,32 @@ impl PersonID {
     }
     /// Add the given people to a given question.
     fn add_for_question(conn:&mut impl Queryable,role:char,question:QuestionID,people:HashSet<&PersonID>) -> mysql::Result<()> {
-        let mut references : Vec<(Option<UserUID>,Option<MPIndexInDatabaseTable>,Option<OrgIndexInDatabaseTable>,Option<CommitteeIndexInDatabaseTable>)> = vec![];
+        let mut references : Vec<(Option<UserUID>,Option<MPIndexInDatabaseTable>,Option<OrgIndexInDatabaseTable>,Option<CommitteeIndexInDatabaseTable>,Option<MinisterIndexInDatabaseTable>)> = vec![];
         for &person in people.iter() {
             match person {
                 PersonID::User(uid) => {
-                    references.push((Some(uid.clone()),None,None,None));
+                    references.push((Some(uid.clone()),None,None,None,None));
                 }
                 PersonID::MP(mp_id) => {
                     let id = mp_id.get_id_from_database(conn)?;
-                    references.push((None,Some(id),None,None));
+                    references.push((None,Some(id),None,None,None));
                 }
                 PersonID::Organisation(org_name) => {
                     let id = get_org_id_from_database(org_name,conn)?;
-                    references.push((None,None,Some(id),None));
+                    references.push((None,None,Some(id),None,None));
                 }
                 PersonID::Committee(committee_id) => {
                     let id = committee_id.get_id_from_database(conn)?;
-                    references.push((None,None,None,Some(id)));
+                    references.push((None,None,None,Some(id),None));
+                }
+                PersonID::Minister(minister_id) => {
+                    let id = minister_id.get_id_from_database(conn)?;
+                    references.push((None,None,None,None,Some(id)));
                 }
             }
         }
         let role = role.to_string();
-        conn.exec_batch("insert into PersonForQuestion (QuestionId,ROLE,UID,MP,ORG,Committee) values (?,?,?,?,?,?)",references.into_iter().map(|(uid,mp,org,committee)|(question.0,&role,uid,mp,org,committee)))?;
+        conn.exec_batch("insert into PersonForQuestion (QuestionId,ROLE,UID,MP,ORG,Committee,Minister) values (?,?,?,?,?,?,?)",references.into_iter().map(|(uid,mp,org,committee,minister)|(question.0,&role,uid,mp,org,committee,minister)))?;
         Ok(())
     }
 
@@ -240,6 +256,10 @@ impl PersonID {
             PersonID::Committee(committee_id) => {
                 let mps = COMMITTEES.get_interpreted().map_err(internal_error)?;
                 if !mps.iter().any(|ci|ci.jurisdiction==committee_id.jurisdiction && ci.name==committee_id.name) { return Err(QuestionError::InvalidCommittee) }
+            }
+            PersonID::Minister(minister_id) => {
+                let mps = MPSpec::get().map_err(internal_error)?;
+                if !mps.mps.iter().any(|mi|mi.is_in_role(minister_id)) { return Err(QuestionError::InvalidMinister) }
             }
         }
         Ok(())
@@ -339,7 +359,7 @@ impl QuestionAnswer {
             if let Some(mp_id) = MPId::read_from_database(conn,mp)? {
                 res.push(QuestionAnswer{answered_by:Some(answered_by),mp:mp_id,answer,timestamp: Some(timestamp),censored,version:opt_hash_from_value(version) })
             } else {
-                eprintln!("Missimg mp {} in question {} answer",mp,question);
+                eprintln!("Missing mp {} in question {} answer",mp,question);
             }
         }
         Ok(res)
@@ -371,14 +391,15 @@ pub struct HansardLink {
 
 /// A list of all hosts that can be linked to by the Hansard Link.
 const ALLOWED_HOSTS: [&'static str; 9] = ["www.aph.gov.au",
-"parliament.act.gov.au",
-"parliament.nsw.gov.au",
-"parliament.nt.gov.au",
-"parliament.qld.gov.au",
-"parliament.sa.gov.au",
-"parliament.tas.gov.au",
-"parliament.vic.gov.au",
-"parliament.wa.gov.au"];
+    "parliament.act.gov.au",
+    "parliament.nsw.gov.au",
+    "parliament.nt.gov.au",
+    "parliament.qld.gov.au",
+    "parliament.sa.gov.au",
+    "parliament.tas.gov.au",
+    "parliament.vic.gov.au",
+    "parliament.wa.gov.au"
+];
 
 impl HansardLink {
     /// Return OK if this seems like a safe URL.
@@ -571,6 +592,13 @@ impl QuestionNonDefiningFields {
                     Ok(vec![])
                 }
             },
+            PersonID::Minister(who) => {
+                if let Some(id) = who.get_id_from_database_if_there(conn)? {
+                    conn.exec_map("select QuestionId from PersonForQuestion where ROLE=? and Minister=?",(role,id),|(v,)|hash_from_value(v))
+                } else {
+                    Ok(vec![])
+                }
+            },
         }
     }
 }
@@ -692,6 +720,10 @@ pub struct QuestionInfo {
     pub(crate) question_id : QuestionID,
     pub(crate) version : LastQuestionUpdate,
     pub(crate) last_modified : Timestamp,
+    /// The total number of times this question has been voted on.
+    pub(crate) total_votes : u32,
+    /// upvotes-downvotes.
+    pub(crate) net_votes : i32,
 }
 
 /// Convert v into a HashValue where you know v will be a 32 byte value
@@ -719,7 +751,11 @@ impl QuestionInfo {
     /// Get information about a question from the database.
     pub async fn lookup(question_id:QuestionID) -> Result<Option<QuestionInfo>,QuestionError> {
         let mut conn = get_rta_database_connection().await.map_err(internal_error)?;
-        if let Some((question_text,timestamp,last_modified,version,author,background,who_should_ask_the_question_permissions,who_should_answer_the_question_permissions,answer_accepted,is_followup_to,censored)) = conn.exec_first("SELECT Question,CreatedTimestamp,LastModifiedTimestamp,Version,CreatedBy,Background,CanOthersSetWhoShouldAsk,CanOthersSetWhoShouldAnswer,AnswerAccepted,FollowUpTo,censored from QUESTIONS where QuestionID=?",(question_id.0,)).map_err(internal_error)? {
+        // mysql crate only handles tuples up to 12 elements. We have 13.
+        // Use less pleasant HList another way to handle wide rows is to use HList (requires `mysql_common/frunk` feature)
+        use mysql_common::frunk::{HList, hlist_pat};
+        type RowType = HList!(String, Timestamp, Timestamp, mysql::Value, String, Option<String>, bool, bool, bool,  mysql::Value, bool,u32,i32);
+        if let Some(hlist_pat![question_text,timestamp,last_modified,version,author,background,who_should_ask_the_question_permissions,who_should_answer_the_question_permissions,answer_accepted,is_followup_to,censored,total_votes,net_votes]) = conn.exec_first::<RowType,_,_>("SELECT Question,CreatedTimestamp,LastModifiedTimestamp,Version,CreatedBy,Background,CanOthersSetWhoShouldAsk,CanOthersSetWhoShouldAnswer,AnswerAccepted,FollowUpTo,censored,TotalVotes,NetVotes from QUESTIONS where QuestionID=?",(question_id.0,)).map_err(internal_error)? {
             if censored { return Err(QuestionError::Censored); }
             match opt_hash_from_value(version) {
                 None => Ok(None),
@@ -740,6 +776,8 @@ impl QuestionInfo {
                         question_id,
                         version,
                         last_modified,
+                        total_votes,
+                        net_votes,
                     }))
                 }
             }
@@ -834,5 +872,42 @@ impl EditQuestionCommand {
     }
 }
 
+/// Vote on a question
+/// This a placeholder plain-text voting while the crypto is being worked out.
+#[derive(Serialize,Deserialize,Debug,Clone)]
+pub struct PlainTextVoteOnQuestionCommand {
+    /// The hashvalue that defines the unique ID of the question to be modified
+    pub question_id: QuestionID,
+    /// If true, an up vote. If false, a down vote.
+    pub up: bool,
+}
 
+/// The structure posted to the bulletin board in response to a PlainTextVoteOnQuestionCommand.
+#[derive(Serialize,Deserialize,Debug,Clone)]
+pub struct PlainTextVoteOnQuestionCommandPostedToBulletinBoard {
+    pub command : ClientSigned<PlainTextVoteOnQuestionCommand>,
+    pub timestamp : Timestamp,
+    /// This will be a link to the prior node in the database.
+    pub prior : LastQuestionUpdate,
+}
+
+
+impl PlainTextVoteOnQuestionCommand {
+    pub async fn vote(command:&ClientSigned<PlainTextVoteOnQuestionCommand>) -> Result<LastQuestionUpdate,QuestionError> {
+        println!("Vote {} for {} from {}",if command.parsed.up {"Up"} else {"Down"},command.parsed.question_id,command.signed_message.user);
+        let mut conn = get_rta_database_connection().await.map_err(internal_error)?;
+        let mut transaction = conn.start_transaction(TxOpts::default()).map_err(internal_error)?;
+        let times_voted = transaction.exec_first::<u32, _, _>("select count(*) from HAS_VOTED where QuestionId=? and Voter=?", (command.parsed.question_id.0, &command.signed_message.user)).map_err(internal_error)?.ok_or(QuestionError::InternalError)?;
+        if times_voted > 0 { return Err(QuestionError::AlreadyVoted) }
+        let (version,) = transaction.exec_first("SELECT Version from QUESTIONS where QuestionID=?", (command.parsed.question_id.0, )).map_err(internal_error)?.ok_or(QuestionError::QuestionDoesNotExist)?;
+        let version = opt_hash_from_value(version).ok_or(QuestionError::InternalError)?;
+        let timestamp = timestamp_now().map_err(internal_error)?;
+        let for_bb = PlainTextVoteOnQuestionCommandPostedToBulletinBoard { command: command.clone(), timestamp, prior: version };
+        let version = LogInBulletinBoard::PlainTextVoteQuestion(for_bb).log_in_bulletin_board().await.map_err(bulletin_board_error)?;
+        transaction.exec_drop("update QUESTIONS set Version=?,LastModifiedTimestamp=?,TotalVotes=TotalVotes+1,NetVotes=NetVotes+? where QuestionID=?", (version.0, timestamp, if command.parsed.up { 1 } else { -1 }, command.parsed.question_id.0)).map_err(internal_error)?;
+        transaction.exec_drop("insert into HAS_VOTED (QuestionID,Voter) values (?,?)", (command.parsed.question_id.0, &command.signed_message.user)).map_err(internal_error)?;
+        transaction.commit().map_err(internal_error)?;
+        Ok(version)
+    }
+}
 

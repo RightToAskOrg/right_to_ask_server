@@ -10,7 +10,7 @@ use merkle_tree_bulletin_board::hash_history::{FullProof, HashInfo};
 use right_to_ask_api::censorship::{CensorQuestionCommand, QuestionHistory, ReportQuestionCommand};
 use right_to_ask_api::signing::{get_server_public_key_base64encoded, ServerSigned, get_server_public_key_raw_hex, get_server_public_key_raw_base64, ClientSigned};
 use right_to_ask_api::common_file::{COMMITTEES, HEARINGS, MPS};
-use right_to_ask_api::question::{EditQuestionCommand, NewQuestionCommand, QuestionID, QuestionInfo, QuestionNonDefiningFields};
+use right_to_ask_api::question::{EditQuestionCommand, NewQuestionCommand, PlainTextVoteOnQuestionCommand, QuestionID, QuestionInfo, QuestionNonDefiningFields};
 use word_comparison::comparison_list::ScoredIDs;
 
 #[post("/new_registration")]
@@ -69,6 +69,17 @@ async fn edit_question(command : Json<ClientSigned<EditQuestionCommand>>) -> Jso
         Json(Err(signing_error.to_string()))
     } else {
         let res = EditQuestionCommand::edit(&command).await;
+        let signed = ServerSigned::sign_string(res);
+        Json(signed)
+    }
+}
+
+#[post("/plaintext_vote_question")]
+async fn plaintext_vote_question(command : Json<ClientSigned<PlainTextVoteOnQuestionCommand>>) -> Json<Result<ServerSigned,String>> {
+    if let Err(signing_error) = command.signed_message.check_signature().await {
+        Json(Err(signing_error.to_string()))
+    } else {
+        let res = PlainTextVoteOnQuestionCommand::vote(&command).await;
         let signed = ServerSigned::sign_string(res);
         Json(signed)
     }
@@ -330,6 +341,7 @@ async fn main() -> anyhow::Result<()> {
             .service(similar_questions)
             .service(new_question)
             .service(edit_question)
+            .service(plaintext_vote_question)
             .service(get_user_list)
             .service(get_user)
             .service(search_user)

@@ -251,3 +251,38 @@ pub struct RegionContainingOtherRegions {
 	pub super_region : String,
 	pub regions: Vec<String>,
 }
+
+impl Jurisdiction {
+	/// return true if the jurisdiction is an appropriate one for a politician in a given chamber.
+	/// * If the jurisdiction is a chamber, thyey should match.
+	/// * If the jurisdiction is a place, it should be hold the chamber
+	pub fn compatible_with(self,chamber:Chamber) -> bool {
+		match self {
+			Jurisdiction::ACT => chamber==Chamber::ACT_Legislative_Assembly,
+			Jurisdiction::NSW => chamber==Chamber::NSW_Legislative_Council || chamber==Chamber::NSW_Legislative_Assembly,
+			Jurisdiction::NT => chamber==Chamber::NT_Legislative_Assembly,
+			Jurisdiction::QLD => chamber==Chamber::Qld_Legislative_Assembly,
+			Jurisdiction::SA => chamber==Chamber::SA_House_Of_Assembly || chamber==Chamber::SA_Legislative_Council,
+			Jurisdiction::TAS => chamber==Chamber::Tas_House_Of_Assembly || chamber==Chamber::Tas_Legislative_Council,
+			Jurisdiction::VIC => chamber==Chamber::Vic_Legislative_Assembly || chamber==Chamber::Vic_Legislative_Council,
+			Jurisdiction::WA => chamber==Chamber::WA_Legislative_Assembly || chamber==Chamber::WA_Legislative_Council,
+			Jurisdiction::Federal => chamber==Chamber::Australian_House_Of_Representatives || chamber==Chamber::Australian_Senate,
+			Jurisdiction::ACT_Legislative_Assembly => chamber==Chamber::ACT_Legislative_Assembly,
+			Jurisdiction::Australian_House_Of_Representatives => chamber==Chamber::Australian_House_Of_Representatives,
+			Jurisdiction::Australian_Senate => chamber==Chamber::Australian_Senate,
+			Jurisdiction::NSW_Legislative_Assembly => chamber==Chamber::NSW_Legislative_Assembly,
+			Jurisdiction::NSW_Legislative_Council => chamber==Chamber::NSW_Legislative_Council,
+			Jurisdiction::NT_Legislative_Assembly => chamber==Chamber::NT_Legislative_Assembly,
+			Jurisdiction::Qld_Legislative_Assembly => chamber==Chamber::Qld_Legislative_Assembly,
+			Jurisdiction::SA_House_Of_Assembly => chamber==Chamber::SA_House_Of_Assembly,
+			Jurisdiction::SA_Legislative_Council => chamber==Chamber::SA_Legislative_Council,
+			Jurisdiction::Vic_Legislative_Assembly => chamber==Chamber::Vic_Legislative_Assembly,
+			Jurisdiction::Vic_Legislative_Council => chamber==Chamber::Vic_Legislative_Council,
+			Jurisdiction::Tas_House_Of_Assembly => chamber==Chamber::Tas_House_Of_Assembly,
+			Jurisdiction::Tas_Legislative_Council => chamber==Chamber::Tas_Legislative_Council,
+			Jurisdiction::WA_Legislative_Assembly => chamber==Chamber::WA_Legislative_Assembly,
+			Jurisdiction::WA_Legislative_Council => chamber==Chamber::WA_Legislative_Council,
+		}
+	}
+
+}
