@@ -123,6 +123,12 @@ Optionally, you can execute
 `./target/release/initialize_databases` and `./target/release/recreate_word_comparison_database`
 between runs. This will reinitialize (i.e. wipe) the database contents.
 
+If you have pulled and compiled an updated version of the server, then the database schema may have changed. In this case, when you run the server you will be prompted to run 
+```
+./target/release/initialize_databases --upgrade 
+```
+to update the database schema **without** deleting the existing data.
+
 ## Copyright
 
 This program is Copyright 2022 Democracy Developers Ltd. 
