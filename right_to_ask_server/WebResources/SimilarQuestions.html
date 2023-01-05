@@ -13,27 +13,47 @@
 <body>
 
 <div id="status"></div>
-<h2>Your new question</h2>
+<h2>Find a question</h2>
 
-<label for="entry">Question: </label><input type="text" id="entry" size="140"/>
+<label for="entry">Text like: </label><input type="text" id="entry" size="140"/>
 
-<h6>Who should ask the question</h6>
-<label for="AddUserAskList">Comma separated users: </label><input type="text" id="AddUserAskList"/><br/>
-<label for="AddDomainAskList">Comma separated domains: </label><input type="text" id="AddDomainAskList"/><br/>
-MP : <span id="AddMPAskList"></span><br/>
-<div id="PoliticianAskList"></div>
-Committee : <span id="AddCommitteeAskList"></span><br/>
-<div id="CommitteeAskList"></div>
-<h6>Who should answer the question</h6>
-<label for="AddUserAnswerList">Comma separated users: </label><input type="text" id="AddUserAnswerList"/><br/>
-<label for="AddDomainAnswerList">Comma separated domains: </label><input type="text" id="AddDomainAnswerList"/><br/>
-MP : <span id="AddMPAnswerList"></span><br/>
-<div id="PoliticianAnswerList"></div>
+<details>
+    <summary>Metadata</summary>
+    <h6>Who should ask the question</h6>
+    <label for="AddUserAskList">Comma separated users: </label><input type="text" id="AddUserAskList"/><br/>
+    <label for="AddDomainAskList">Comma separated domains: </label><input type="text" id="AddDomainAskList"/><br/>
+    MP : <span id="AddMPAskList"></span><br/>
+    <div id="PoliticianAskList"></div>
+    Committee : <span id="AddCommitteeAskList"></span><br/>
+    <div id="CommitteeAskList"></div>
+    <h6>Who should answer the question</h6>
+    <label for="AddUserAnswerList">Comma separated users: </label><input type="text" id="AddUserAnswerList"/><br/>
+    <label for="AddDomainAnswerList">Comma separated domains: </label><input type="text" id="AddDomainAnswerList"/><br/>
+    MP : <span id="AddMPAnswerList"></span><br/>
+    <div id="PoliticianAnswerList"></div>
+</details>
 
+<details>
+    <summary>Weights</summary>
+    <label for="weight_text">Text : </label><input id="weight_text" type="number" value="1" min="0" /> <br/>
+    <label for="weight_metadata">Metadata : </label><input id="weight_metadata" type="number" value="20" min="0" /> <br/>
+    <label for="weight_total_votes">Total Votes : </label><input id="weight_total_votes" type="number" value="5" min="0" /> <br/>
+    <label for="weight_net_votes">Total Votes : </label><input id="weight_net_votes" type="number" value="5" min="0" /> <br/>
+    <label for="weight_recentness">Recentness : </label><input id="weight_recentness" type="number" value="10" min="0" /> <br/>
+    <label for="weight_recentness_timescale">Recentness timescale (s) : </label><input id="weight_recentness_timescale" type="number" value="3600" min="1" /> <br/>
+</details>
+
+<details>
+    <summary>Pagination</summary>
+    <label for="page_from">First question to show (0 based, inclusive) : </label><input id="page_from" type="number" value="0" min="0" /> <br/>
+    <label for="page_to">Last question to show (0 based, exclusive) : </label><input id="page_to" type="number" value="5" min="0" /> <br/>
+</details>
 
 <h3>Similar Questions</h3>
 <div id="SimilarQuestions"></div>
-
+<div>
+    Showing <span id="current_page_from"></span> to <span id="current_page_to"></span> <button id="next_page" onclick="goto_next_page()">Next page</button>
+</div>
 <!--
 <h2>All Questions</h2>
 <div id="AllQuestions"></div>

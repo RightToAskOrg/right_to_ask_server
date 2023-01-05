@@ -7,6 +7,17 @@ This contains secret information. Do not check into git!
 
 It should contain the following sections
 
+## General configuration
+
+Some general configuration for the server goes at the top. At the moment there 
+is only one entry
+
+```toml
+# Define the number of users' long searches that are cached. Should be O(number of users per hour)
+search_cache_size=1000
+```
+
+
 ## Server signing key.
 
 This should be an ECDSA key.

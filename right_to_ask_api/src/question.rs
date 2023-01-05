@@ -9,17 +9,22 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use std::fmt::{Debug, Display, Formatter};
+use futures::lock::{Mutex, MutexGuard};
 use serde::{Serialize, Deserialize};
 use merkle_tree_bulletin_board::hash::HashValue;
 use merkle_tree_bulletin_board::hash_history::{Timestamp, timestamp_now};
 use mysql::prelude::Queryable;
 use mysql::{Transaction, TxOpts};
+use once_cell::sync::Lazy;
+use rand::Rng;
 use reqwest::Url;
 use sha2::{Digest, Sha256};
 use url::Host;
+use word_comparison::comparison_list::ScoredIDs;
 use crate::committee::{CommitteeId, CommitteeIndexInDatabaseTable};
 use crate::common_file::COMMITTEES;
-use crate::database::{add_question_to_comparison_database, get_rta_database_connection, LogInBulletinBoard};
+use crate::config::CONFIG;
+use crate::database::{add_question_to_comparison_database, find_similar_text_question, get_rta_database_connection, LogInBulletinBoard};
 use crate::minister::{MinisterId, MinisterIndexInDatabaseTable};
 use crate::mp::{get_org_id_from_database, MPId, MPIndexInDatabaseTable, MPSpec, OrgIndexInDatabaseTable};
 use crate::person::{user_exists, UserUID};
@@ -909,5 +914,138 @@ impl PlainTextVoteOnQuestionCommand {
         transaction.commit().map_err(internal_error)?;
         Ok(version)
     }
+}
+
+/// When you query for the best questions matching various things, there is a trade off between various constraints.
+/// The list of resulting questions is ordered by a score, which is the sum of the weights below times the individual subscores.
+/// If you don't want to use some subscore, set the weight to zero.
+#[derive(Serialize,Deserialize,Debug,Clone,Copy)]
+pub struct WeightsForScoring {
+    /// The weight multiplying the score from text matching. The base score is a max of 10 per word.
+    pub text : u64,
+    /// The weight multiplying the number of metadata items matching. The base score is 1 per metadata match.
+    pub metadata : u64,
+    /// The weight multiplying a score reflecting the total number of votes. The base score is ln(total_votes+1), which is 0 for 0 votes and ~0.69 for 1 vote and ~2.4 for 10 votes and ~6.9 for 1000 votes.
+    pub total_votes : u64,
+    /// The weight multiplying a score reflecting the net votes. The base score is signum(net_votes)*ln(|net_votes|+1). This is 0 for 0 net votes, ~0.69 for 1 net vote and ~-0.69 for -1 net votes
+    pub net_votes : u64,
+    /// The weight multiplying the recentness score, which is 0 to 1, with 1 meaning just posted and 0 meaning very old.
+    pub recentness : u64,
+    /// The time scale in seconds of "recentness", which is e^(-(time since inception)/recentness_timescale)
+    pub recentness_timescale : u64,
+}
+
+/// A token returned from a query, which can be used (as long as it is not stale) to get the next page of the same query
+pub type PreviousQueryToken = HashValue;
+
+
+
+
+impl QuestionPagination {
+    fn generate_random_token() -> PreviousQueryToken {
+        let mut res = [0u8;32];
+        rand::thread_rng().fill(&mut res);
+        HashValue(res)
+    }
+
+    async fn get_similar_question_cache() -> MutexGuard<'static,lru::LruCache<PreviousQueryToken,Vec<ScoredIDs<QuestionID>>>> {
+        static CACHE : Lazy<Mutex<lru::LruCache<PreviousQueryToken,Vec<ScoredIDs<QuestionID>>>>> = Lazy::new(|| {
+            Mutex::new(lru::LruCache::new(CONFIG.search_cache_size))
+        });
+        CACHE.lock().await
+    }
+
+    /// store a previously computed result in the cache.
+    async fn remember_similar_question_result(result:Vec<ScoredIDs<QuestionID>>) -> PreviousQueryToken {
+        let token = Self::generate_random_token(); // 256 bit tokens won't clash. And it doesn't matter much even if they did.
+        Self::get_similar_question_cache().await.put(token,result);
+        token
+    }
+
+    fn get_requested_page(&self,all_questions:&Vec<ScoredIDs<QuestionID>>) -> Vec<ScoredIDs<QuestionID>> {
+        all_questions[self.from.min(all_questions.len())..self.to.min(all_questions.len())].to_vec()
+    }
+
+    /// Get a result from a prior list, if possible.
+    async fn try_get_previously_remembered_similar_question_result(&self) -> Option<SimilarQuestionResult> {
+        let mut cache = Self::get_similar_question_cache().await;
+        if let Some(token) = &self.token {
+            if let Some(found) = cache.get(token) {
+                Some(SimilarQuestionResult{ token: Some(*token), questions: self.get_requested_page(found) })
+            } else { None }
+        } else { None }
+    }
+
+}
+
+
+/// Information about which pages you want of the current question
+#[derive(Serialize,Deserialize,Debug,Clone,Copy)]
+pub struct QuestionPagination {
+    /// get questions from the given value (inclusive, first is 0)
+    pub from : usize,
+    /// Get questions to the given value (exclusive)
+    pub to : usize,
+    /// If possible, use the token returned from the previous question to get the next page of the same result set.
+    #[serde(skip_serializing_if = "Option::is_none",default)]
+    pub token : Option<PreviousQueryToken>,
+}
+
+impl Default for QuestionPagination {
+    fn default() -> Self {
+        QuestionPagination{ from: 0, to: 50, token: None}
+    }
+}
+
+#[derive(Serialize,Deserialize,Debug,Clone)]
+pub struct SimilarQuestionQuery {
+    pub weights : WeightsForScoring,
+    #[serde(default)]
+    pub page : QuestionPagination,
+    /// The text of the question
+    pub question_text : String,
+    // additional metadata that may be requested.
+    #[serde(flatten)]
+    pub non_defining_fields : QuestionNonDefiningFields,
+}
+
+#[derive(Serialize,Deserialize,Debug,Clone)]
+pub struct SimilarQuestionResult {
+    // if there are more pages, a token that can be used to retrieve them. If a token was provided, and the same token returned, it used the previous results. Otherwise token was stale and a new one was used.
+    pub token : Option<PreviousQueryToken>,
+    pub questions : Vec<ScoredIDs<QuestionID>>
+}
+
+impl SimilarQuestionQuery {
+
+    pub async fn similar_questions(command:&SimilarQuestionQuery) -> Result<SimilarQuestionResult,QuestionError> {
+        if let Some(cached_result) = command.page.try_get_previously_remembered_similar_question_result().await {
+            return Ok(cached_result); // not just for speed, also to avoid missing/duplicate questions.
+        }
+        let just_text = find_similar_text_question(&command.question_text).await.map_err(internal_error)?;
+        let just_metadata  = QuestionNonDefiningFields::find_similar_metadata(&command.non_defining_fields).await?;
+        let mut all_questions: Vec<ScoredIDs<QuestionID>> = if just_metadata.is_empty() {
+            just_text.into_iter().map(|sid|ScoredIDs{ id: sid.id, score: command.weights.text as f64*sid.score}).collect()
+        } else if just_text.is_empty() { // if no text matches, just use metadata matches.
+            just_metadata.into_iter().map(|(q,n)|ScoredIDs{ id: q, score: command.weights.metadata as f64*(n as f64) }).collect()
+        } else { // if both text and metadata matches, use just the ones with matching text, but add metadata scores.
+            just_text.into_iter().map(|s|ScoredIDs{ id:s.id, score:command.weights.text as f64*s.score+command.weights.metadata as f64*(just_metadata.get(&s.id).cloned().unwrap_or(0) as f64)}).collect()
+        };
+        let mut conn = get_rta_database_connection().await.map_err(internal_error)?;
+        let now = timestamp_now().map_err(internal_error)?;
+        for q in &mut all_questions {
+            if let Some((created,total_votes,net_votes)) = conn.exec_first::<(Timestamp,u64,i64),_,_>("SELECT CreatedTimestamp,TotalVotes,NetVotes from QUESTIONS where QuestionID=?", (&q.id.0,)).map_err(internal_error)? {
+                let recentness = if created>now {0.0} else {f64::exp((-((now-created)as f64))/(command.weights.recentness_timescale as f64))};
+                let total_votes = f64::ln_1p(total_votes as f64);
+                let net_votes = (if net_votes>=0 {1.0} else {-1.0})*f64::ln_1p(f64::abs(total_votes as f64));
+                q.score+=command.weights.recentness as f64*recentness+command.weights.net_votes as f64*net_votes+command.weights.total_votes as f64*total_votes;
+            }
+        }
+        all_questions.sort_by(|a, b|b.score.partial_cmp(&a.score).unwrap());
+        let questions = command.page.get_requested_page(&all_questions);
+        let token = if all_questions.len()==questions.len() { None } else { Some(QuestionPagination::remember_similar_question_result(all_questions).await) };
+        Ok(SimilarQuestionResult{token,questions})
+    }
+
 }
 

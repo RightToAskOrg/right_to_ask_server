@@ -10,7 +10,7 @@ use merkle_tree_bulletin_board::hash_history::{FullProof, HashInfo};
 use right_to_ask_api::censorship::{CensorQuestionCommand, QuestionHistory, ReportQuestionCommand};
 use right_to_ask_api::signing::{get_server_public_key_base64encoded, ServerSigned, get_server_public_key_raw_hex, get_server_public_key_raw_base64, ClientSigned};
 use right_to_ask_api::common_file::{COMMITTEES, HEARINGS, MPS};
-use right_to_ask_api::question::{EditQuestionCommand, NewQuestionCommand, PlainTextVoteOnQuestionCommand, QuestionID, QuestionInfo, QuestionNonDefiningFields};
+use right_to_ask_api::question::{EditQuestionCommand, NewQuestionCommand, PlainTextVoteOnQuestionCommand, QuestionID, QuestionInfo, QuestionNonDefiningFields, SimilarQuestionQuery, SimilarQuestionResult};
 use word_comparison::comparison_list::ScoredIDs;
 
 #[post("/new_registration")]
@@ -44,12 +44,17 @@ async fn similar_questions_work(command:&NewQuestionCommand) -> Result<Vec<Score
         unordered
     })
 }
-
+/// This function is deprecated and replaced by get_similar_questions.
 #[post("/similar_questions")]
 async fn similar_questions(command : Json<NewQuestionCommand>) -> Json<Result<Vec<ScoredIDs<QuestionID>>,String>> {
     Json(similar_questions_work(&command).await)
 }
 
+/// This is idempotent; it is a post because the sent data structure is quite complex.
+#[post("/get_similar_questions")]
+async fn get_similar_questions(command : Json<SimilarQuestionQuery>) -> Json<Result<SimilarQuestionResult,String>> {
+    Json(SimilarQuestionQuery::similar_questions(&command).await.map_err(|e|e.to_string()))
+}
 
 
 #[post("/new_question")]
@@ -339,6 +344,7 @@ async fn main() -> anyhow::Result<()> {
             .service(request_email_validation)
             .service(email_proof)
             .service(similar_questions)
+            .service(get_similar_questions)
             .service(new_question)
             .service(edit_question)
             .service(plaintext_vote_question)

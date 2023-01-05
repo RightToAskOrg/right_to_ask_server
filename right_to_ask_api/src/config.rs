@@ -11,6 +11,7 @@ const CONFIG_FILE_NAME: &str = "config.toml";
 pub struct Config {
     pub(crate) signing : Base64EncodedKeyPair,
     pub(crate) database : DatabaseURLs,
+    pub(crate) search_cache_size : std::num::NonZeroUsize,
 }
 
 
