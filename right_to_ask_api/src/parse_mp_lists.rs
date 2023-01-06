@@ -583,7 +583,7 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     let senate_pdf = download_to_file("https://www.aph.gov.au/-/media/03_Senators_and_Members/31_Senators/contacts/los.pdf").await?;
     parse_australian_senate_pdf(senate_pdf.path())?;
     senate_pdf.persist(dir.join(Chamber::Australian_Senate.to_string()+".pdf"))?;
-    let house_reps_pdf = download_to_file("https://www.aph.gov.au/-/media/03_Senators_and_Members/32_Members/Lists/Members_List_2021.pdf").await?;
+    let house_reps_pdf = download_to_file("https://www.aph.gov.au/-/media/03_Senators_and_Members/32_Members/Lists/Members_List_2023.pdf").await?;
     parse_australian_house_reps_pdf(house_reps_pdf.path(),&extract_electorates(&australian_house_reps_res)?)?;
     house_reps_pdf.persist(dir.join(Chamber::Australian_House_Of_Representatives.to_string()+".pdf"))?;
 
