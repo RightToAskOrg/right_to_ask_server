@@ -1018,6 +1018,10 @@ pub struct SimilarQuestionResult {
 
 impl SimilarQuestionQuery {
 
+    /// This function doesn't scale. It takes time proportional to the number of questions.
+    /// This will need to be addressed at some point, but it will probably require heuristics
+    /// which will require knowledge of the types of questions that appear, which will be a lot
+    /// easier when more people are using it.
     pub async fn similar_questions(command:&SimilarQuestionQuery) -> Result<SimilarQuestionResult,QuestionError> {
         if let Some(cached_result) = command.page.try_get_previously_remembered_similar_question_result().await {
             return Ok(cached_result); // not just for speed, also to avoid missing/duplicate questions.
@@ -1025,7 +1029,11 @@ impl SimilarQuestionQuery {
         let just_text = find_similar_text_question(&command.question_text).await.map_err(internal_error)?;
         let just_metadata  = QuestionNonDefiningFields::find_similar_metadata(&command.non_defining_fields).await?;
         let mut all_questions: Vec<ScoredIDs<QuestionID>> = if just_metadata.is_empty() {
-            just_text.into_iter().map(|sid|ScoredIDs{ id: sid.id, score: command.weights.text as f64*sid.score}).collect()
+            if command.question_text.is_empty() { // get trending questions.
+                QuestionInfo::get_list_of_all_questions().await.map_err(internal_error)?.into_iter().map(|id|ScoredIDs{id,score:0.0}).collect()
+            } else {
+                just_text.into_iter().map(|sid|ScoredIDs{ id: sid.id, score: command.weights.text as f64*sid.score}).collect()
+            }
         } else if just_text.is_empty() { // if no text matches, just use metadata matches.
             just_metadata.into_iter().map(|(q,n)|ScoredIDs{ id: q, score: command.weights.metadata as f64*(n as f64) }).collect()
         } else { // if both text and metadata matches, use just the ones with matching text, but add metadata scores.
