@@ -9,6 +9,7 @@ use std::fmt;
 use std::fmt::Debug;
 use std::sync::Mutex;
 use std::time::Duration;
+use anyhow::anyhow;
 use mysql::{TxOpts, Value, FromValueError};
 use crate::database::{get_rta_database_connection, LogInBulletinBoard};
 use mysql::prelude::{Queryable, ConvIr, FromValue};
@@ -67,6 +68,10 @@ fn bulletin_board_error(error:anyhow::Error) -> RegistrationError {
 fn internal_error<T:Debug>(error:T) -> RegistrationError {
     eprintln!("Internal error {:?}",error);
     RegistrationError::InternalError
+}
+fn email_internal_error<T:Debug>(error:T) -> EmailValidationError {
+    eprintln!("Internal error {:?}",error);
+    EmailValidationError::InternalError
 }
 #[derive(Debug,Clone,Serialize,Deserialize,Eq,PartialEq)]
 pub struct UserInfo {
@@ -279,6 +284,11 @@ pub enum EmailValidationError {
     BadgeNameDoesNotMatchEmailAddress,
     AlreadyHaveBadge,
     DoesNotHaveBadgeToRevoke,
+    OnDoNotEmailList, // if trying to send to someone who is on the list
+    AlreadyOnDoNotEmailList, // if trying to put on and already there.
+    NotOnDoNotEmailList, // if trying to take off and not already there.
+    SentTooFrequentlyToday,
+    SentTooFrequentlyThisMonth,
 }
 
 impl fmt::Display for EmailValidationError {
@@ -309,6 +319,98 @@ pub struct EmailAddress {
     email : String,
 }
 
+impl EmailAddress {
+
+    /// check to see if the email is in the DoNotEmail list. If so, don't send.
+    async fn check_is_not_in_do_not_email_list(&self) -> Result<(), EmailValidationError>  {
+        let mut conn = get_rta_database_connection().await.map_err(email_internal_error)?;
+        if let Some(count) = conn.exec_first::<u64,_,_>("SELECT COUNT(*) from DoNotEmail where email=?",(&self.canonicalise_for_equality_check(),)).map_err(internal_error_email)? {
+            if count==0 { Ok(()) } else { Err(EmailValidationError::OnDoNotEmailList) }
+        } else { Err(internal_error_email(anyhow!("No return from select count in is_in_do_not_email_list"))) }
+    }
+
+    /// if want_on, insert email address into the DoNotEmail list. If !want_on, remove email address from the DoNotEmail list.
+    pub async fn change_do_not_email_list(&self,want_on:bool) -> Result<(), EmailValidationError>  {
+        let mut conn = get_rta_database_connection().await.map_err(email_internal_error)?;
+        let mut transaction = conn.start_transaction(TxOpts::default()).map_err(email_internal_error)?;
+        if let Some(count) = transaction.exec_first::<u64,_,_>("SELECT COUNT(*) from DoNotEmail where email=?",(&self.canonicalise_for_equality_check(),)).map_err(internal_error_email)? {
+            if want_on {
+                if count!=0  { return Err(EmailValidationError::AlreadyOnDoNotEmailList) }
+            } else {
+                if count==0  { return Err(EmailValidationError::NotOnDoNotEmailList) }
+            }
+        } else { return Err(internal_error_email(anyhow!("No return from select count in change_do_not_email_list"))) }
+        if want_on {
+            transaction.exec_drop("insert into DoNotEmail (email) values (?)",(&self.canonicalise_for_equality_check(),)).map_err(internal_error_email)?;
+        } else {
+            transaction.exec_drop("delete from DoNotEmail where email=?",(&self.canonicalise_for_equality_check(),)).map_err(internal_error_email)?;
+        }
+        transaction.commit().map_err(internal_error_email)?;
+        Ok(())
+    }
+
+    /// Get a simple list of all email addresses in the DoNotEmail table.
+    pub async fn get_do_not_email_list() -> Result<Vec<EmailAddress>,EmailValidationError> {
+        let mut conn = get_rta_database_connection().await.map_err(email_internal_error)?;
+        conn.query_map("SELECT email from DoNotEmail",|email|EmailAddress{email}).map_err(internal_error_email)
+    }
+    /// Maximum number of emails that can be sent to a given email address in a single day
+    const MAX_SENT_PER_DAY: u32 = 5;
+    /// Maximum number of emails that can be sent to a given email address in a single month
+    const MAX_SENT_PER_MONTH: u32 = 10;
+
+    /// Fred@Fred.COM and fred@fred.com are the same email address. Convert to a simple form.
+    /// TODO deal with fred+32@fred.com
+    fn canonicalise_for_equality_check(&self) -> String {
+        self.email.to_lowercase()
+    }
+
+    /// record the fact that an email is about to be sent to this email address, and return an error if it is already sent to frequently.
+    ///
+    async fn add_to_times_sent(&self) -> Result<(),EmailValidationError> {
+        let mut conn = get_rta_database_connection().await.map_err(email_internal_error)?;
+        let mut transaction = conn.start_transaction(TxOpts::default()).map_err(email_internal_error)?;
+        // first check we aren't overdoing things
+        let existing : Vec<(u32,u32)> = transaction.exec_map("SELECT timescale,sent from EmailRateLimitHistory where email=?",(&self.canonicalise_for_equality_check(),),|(timescale,sent)|(timescale,sent)).map_err(internal_error_email)?;
+        for (timescale,sent) in &existing {
+            match *timescale {
+                0 => if *sent>=Self::MAX_SENT_PER_DAY {return Err(EmailValidationError::SentTooFrequentlyToday)}
+                1 => if *sent>=Self::MAX_SENT_PER_MONTH {return Err(EmailValidationError::SentTooFrequentlyThisMonth)}
+                _ => return Err(EmailValidationError::InternalError)
+            }
+        }
+        // indicate that we are doing them.
+        for timescale in [0,1] {
+            if let Some((_,sent)) = existing.iter().find(|(t,_)|*t==timescale) {
+                transaction.exec_drop("update EmailRateLimitHistory set sent=? where email=? and timescale=?",(*sent+1,&self.canonicalise_for_equality_check(),timescale)).map_err(internal_error_email)?;
+            } else {
+                transaction.exec_drop("insert into EmailRateLimitHistory (email,timescale,sent) values (?,?,1)",(&self.canonicalise_for_equality_check(),timescale)).map_err(internal_error_email)?;
+            }
+        }
+        transaction.commit().map_err(internal_error_email)?;
+        Ok(())
+    }
+
+    /// Get rid of all entries in the EmailRateLimitHistory with a particular timescale (0=day, 1=month).
+    pub async fn reset_times_sent(timescale:u32) -> Result<(),EmailValidationError> {
+        let mut conn = get_rta_database_connection().await.map_err(email_internal_error)?;
+        conn.exec_drop("delete from EmailRateLimitHistory where timescale=?",(timescale,)).map_err(internal_error_email)
+    }
+
+    /// Get rid of all entries in the EmailRateLimitHistory with a particular timescale (0=day, 1=month).
+    pub async fn get_times_sent(timescale:u32) -> Result<Vec<TimesSent>,EmailValidationError> {
+        let mut conn = get_rta_database_connection().await.map_err(email_internal_error)?;
+        conn.exec_map("select email,sent from EmailRateLimitHistory where timescale=?",(timescale,),|(email,sent)|TimesSent{email,sent}).map_err(internal_error_email)
+    }
+}
+
+#[derive(Debug,Clone,Serialize)]
+pub struct TimesSent {
+    email : String,
+    /// The number of times it has been sent on a given timescale
+    sent : u32,
+}
+
 pub static EMAIL_VALIDATION_CODE_STORAGE : Lazy<Mutex<TimeLimitedHashMap<HashValue,(u32,ClientSigned<RequestEmailValidation,EmailAddress>)>>> = Lazy::new(||Mutex::new(TimeLimitedHashMap::new(Duration::from_secs(3600))));
 
 impl RequestEmailValidation {
@@ -316,10 +418,10 @@ impl RequestEmailValidation {
     /// * Post the request to the bulletin board? Should this be done??
     /// * Make a response code and email it to the requested email address.
     /// * Store said code for use with EmailProof.
-    /// TODO implement some way to stop this being used for DOS spam.
     ///
     /// Returns a hash value that can be used for EmailProof.
     pub async fn process(sig : &ClientSigned<RequestEmailValidation,EmailAddress>) -> Result<HashValue, EmailValidationError> {
+        sig.signed_message.unsigned.check_is_not_in_do_not_email_list().await?;
         let badge = RequestEmailValidation::get_badge(sig)?;
         match sig.parsed.why.get_type() {
             EmailValidationType::GainBadge => {
@@ -331,6 +433,7 @@ impl RequestEmailValidation {
             EmailValidationType::AccountRecovery => {}
         }
         let code : u32 = rand::thread_rng().gen_range(100000..1000000);
+        sig.signed_message.unsigned.add_to_times_sent().await?;
         println!("Consider this an email to {} with code {}",sig.signed_message.unsigned.email,code); // TODO actually send email.
         let hash = {
             let data = serde_json::ser::to_string(&sig.signed_message).unwrap();
@@ -384,6 +487,8 @@ impl RequestEmailValidation {
             }
         }
     }
+
+
 }
 
 #[derive(Debug,Clone,Serialize,Deserialize,Eq,PartialEq)]

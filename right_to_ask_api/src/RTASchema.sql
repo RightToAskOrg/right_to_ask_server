@@ -13,10 +13,12 @@ drop table if exists Answer;
 
 create table if not exists USERS
 (
+    id          INTEGER PRIMARY KEY AUTO_INCREMENT NOT NULL, /* The real permanent unique id for a person. UID rarely changes but sometimes does. */
     UID         VARCHAR(30) PRIMARY KEY NOT NULL,
     DisplayName VARCHAR(60),
     AusState    VARCHAR(3),
-    PublicKey   TEXT NOT NULL
+    PublicKey   TEXT NOT NULL,
+    INDEX(UID)
 ) CHARACTER SET utf8;
 
 create table if not exists ELECTORATES
@@ -191,6 +193,30 @@ create table HansardLink
     url         TEXT, /* The URL */
     INDEX(QuestionId)
 ) CHARACTER SET utf8;
+
+/**
+  This is a list of emails that the server should never send email to.
+  Typically this is because they have been targetted by malicious thirs parties, and the
+  email address owner has asked for their email to be restricted.
+ */
+create table DoNotEmail(
+    email   TEXT,
+    INDEX(email(20))
+) CHARACTER SET utf8;
+
+/* To prevent RTA from being used to send too many emails maliciously to a third party, there
+   is a rate limit associated with a particular address. This may be over different periods.
+   Periodically, all rates with a given timescale are deleted.
+ */
+create table EmailRateLimitHistory(
+                                      email   TEXT,
+                                      timescale  INT NOT NULL, /* 0 means today, 1 means this month */
+                                      sent    INT NOT NULL, /* The number of times this email has been sent on this timescale */
+                                      INDEX(email(20)),
+                                      INDEX(timescale)
+) CHARACTER SET utf8;
+
+
 
 create table SchemaVersion
 (

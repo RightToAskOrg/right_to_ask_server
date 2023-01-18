@@ -3,7 +3,7 @@ use actix_web::{HttpServer, middleware, web};
 use actix_web::{get, post};
 use std::path::PathBuf;
 use actix_web::web::Json;
-use right_to_ask_api::person::{NewRegistration, get_list_of_all_users, get_count_of_all_users, UserInfo, get_user_by_id, RequestEmailValidation, EmailProof, EmailAddress, EditUserDetails, MiniUserInfo, search_for_users};
+use right_to_ask_api::person::{NewRegistration, get_list_of_all_users, get_count_of_all_users, UserInfo, get_user_by_id, RequestEmailValidation, EmailProof, EmailAddress, EditUserDetails, MiniUserInfo, search_for_users, TimesSent};
 use merkle_tree_bulletin_board::hash::HashValue;
 use right_to_ask_api::database::{check_rta_database_version_current, find_similar_text_question, get_bulletin_board};
 use merkle_tree_bulletin_board::hash_history::{FullProof, HashInfo};
@@ -323,6 +323,32 @@ async fn reload_info() -> &'static str {
     "OK"
 }
 
+#[post("/put_on_do_not_email_list")]
+async fn put_on_do_not_email_list(command : Json<EmailAddress>) -> Json<Result<(),String>> {
+    Json(command.change_do_not_email_list(true).await.map_err(|e|e.to_string()))
+}
+#[post("/take_off_do_not_email_list")]
+async fn take_off_do_not_email_list(command : Json<EmailAddress>) -> Json<Result<(),String>> {
+    Json(command.change_do_not_email_list(false).await.map_err(|e|e.to_string()))
+}
+
+#[get("/get_do_not_email_list")]
+async fn get_do_not_email_list() -> Json<Result<Vec<EmailAddress>,String>> {
+    Json(EmailAddress::get_do_not_email_list().await.map_err(|e|e.to_string()))
+}
+#[post("/reset_times_sent")]
+async fn reset_times_sent(command : Json<u32>) -> Json<Result<(),String>> {
+    Json(EmailAddress::reset_times_sent(command.0).await.map_err(|e|e.to_string()))
+}
+#[derive(serde::Deserialize)]
+struct QueryTimescale {
+    timescale : u32,
+}
+#[get("/get_times_sent")]
+async fn get_times_sent(query:web::Query<QueryTimescale>) -> Json<Result<Vec<TimesSent>,String>> {
+    Json(EmailAddress::get_times_sent(query.timescale).await.map_err(|e|e.to_string()))
+}
+
 
 
 #[actix_web::main]
@@ -369,6 +395,11 @@ async fn main() -> anyhow::Result<()> {
             .service(hearings)
             .service(info)
             .service(reload_info)
+            .service(take_off_do_not_email_list)
+            .service(put_on_do_not_email_list)
+            .service(get_do_not_email_list)
+            .service(reset_times_sent)
+            .service(get_times_sent)
             .service(actix_files::Files::new("/journal/", "journal").use_last_modified(true).use_etag(true).show_files_listing())
             .service(actix_files::Files::new("/", find_web_resources()).use_last_modified(true).use_etag(true).index_file("index.html"))
     })
