@@ -1,0 +1,6 @@
+The user [USERNAME] has requested validation of this email address for RightToAsk(TM).
+
+If this is you, please enter the following code into the App : [CODE]
+
+If this is not you, we apologise. Please email XXXXX@XXXXXX if you would like to be placed on the do not email list.
+

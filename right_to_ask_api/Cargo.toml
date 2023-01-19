@@ -27,7 +27,7 @@ csv = "1.1"
 reqwest = { version = "0.11", features = ["blocking", "json"] }
 tempfile = "3.3"
 pdf = "0.7"
-scraper = "0.13"
+scraper = "0.14"
 itertools = "0.10"
 regex = "1"
 calamine = "0.19"
@@ -37,6 +37,7 @@ clap = { version = "3.2", features = ["derive"] }
 encoding_rs = "0.8"
 encoding_rs_io = "0.1"
 url = "2.2.2"
-lru = "0.8"
+lru = "0.9"
+lettre = { version = "0.10", features=["smtp-transport","tokio1","tokio1-native-tls","serde"]}
 # Just used for binaries. May be removed in future.
 tokio = { version = "1", features = ["full"] }

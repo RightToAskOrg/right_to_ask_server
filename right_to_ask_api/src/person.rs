@@ -10,6 +10,8 @@ use std::fmt::Debug;
 use std::sync::Mutex;
 use std::time::Duration;
 use anyhow::anyhow;
+use lettre::Message;
+use lettre::message::{Mailbox, MultiPart, SinglePart};
 use mysql::{TxOpts, Value, FromValueError};
 use crate::database::{get_rta_database_connection, LogInBulletinBoard};
 use mysql::prelude::{Queryable, ConvIr, FromValue};
@@ -17,6 +19,7 @@ use merkle_tree_bulletin_board::hash::HashValue;
 use once_cell::sync::Lazy;
 use rand::Rng;
 use sha2::{Digest, Sha256};
+use crate::config::CONFIG;
 use crate::mp::MPSpec;
 use crate::signing::ClientSigned;
 use crate::time_limited_hashmap::TimeLimitedHashMap;
@@ -289,6 +292,8 @@ pub enum EmailValidationError {
     NotOnDoNotEmailList, // if trying to take off and not already there.
     SentTooFrequentlyToday,
     SentTooFrequentlyThisMonth,
+    InvalidEmailAddress,
+    CouldNotSendEmail,
 }
 
 impl fmt::Display for EmailValidationError {
@@ -419,6 +424,10 @@ pub struct TimesSent {
 pub static EMAIL_VALIDATION_CODE_STORAGE : Lazy<Mutex<TimeLimitedHashMap<HashValue,(u32,ClientSigned<RequestEmailValidation,EmailAddress>)>>> = Lazy::new(||Mutex::new(TimeLimitedHashMap::new(Duration::from_secs(3600))));
 
 impl RequestEmailValidation {
+    const EMAIL_SUBJECT_LINE : &'static str = "RightToAsk email validation code";
+    const EMAIL_BODY_TEMPLATE : &'static str = include_str!("templates/EmailVerificationCodeBody.txt");
+    const EMAIL_BODY_TEMPLATE_HTML : &'static str = include_str!("templates/EmailVerificationCodeBody.html");
+
     /// Deal with a RequestEmailValidation
     /// * Post the request to the bulletin board? Should this be done??
     /// * Make a response code and email it to the requested email address.
@@ -439,7 +448,36 @@ impl RequestEmailValidation {
         }
         let code : u32 = rand::thread_rng().gen_range(100000..1000000);
         sig.signed_message.unsigned.add_to_times_sent().await?;
-        println!("Consider this an email to {} with code {}",sig.signed_message.unsigned.email,code); // TODO actually send email.
+        let parsed_to : Mailbox = sig.signed_message.unsigned.email.parse().map_err(|_|EmailValidationError::InvalidEmailAddress)?;
+        if let Some(email_config) = &CONFIG.email {
+            let body = Self::EMAIL_BODY_TEMPLATE.replace("[USERNAME]",&sig.signed_message.user).replace("[CODE]",&code.to_string());
+            let body_html = Self::EMAIL_BODY_TEMPLATE_HTML.replace("[USERNAME]",&sig.signed_message.user).replace("[CODE]",&code.to_string());
+            let parsed_to = if let Some(overriding) = &email_config.testing_email_override { overriding.mailbox() } else { parsed_to };
+            let email = Message::builder()
+                .from(email_config.verification_from_email.mailbox())
+                .reply_to(email_config.verification_reply_to_email.mailbox())
+                .to(parsed_to)
+                .subject(Self::EMAIL_SUBJECT_LINE)
+                .multipart(MultiPart::alternative()
+                               .singlepart(SinglePart::plain(body))
+                               .singlepart(SinglePart::html(body_html))
+                          )
+                .map_err(internal_error_email)?;
+            if let Some(creds) = &email_config.smtp_credentials {
+                // synchronous version
+                // let mailer = lettre::SmtpTransport::starttls_relay(&email_config.relay).map_err(internal_error_email)?.credentials(creds).build();
+                use lettre::transport::smtp::AsyncSmtpTransport;
+                let mailer : AsyncSmtpTransport<lettre::Tokio1Executor> = AsyncSmtpTransport::<lettre::Tokio1Executor>::starttls_relay(&email_config.relay).map_err(internal_error_email)?.credentials(creds.clone()).build();
+                use lettre::AsyncTransport;
+                mailer.send(email).await.map_err(|e|{
+                    println!("Could not send email to {} because of {}",sig.signed_message.unsigned.email,e);
+                    EmailValidationError::CouldNotSendEmail})?;
+            } else {
+                println!("No credentials for sending email found in config.toml. Can't send emails.")
+            }
+        } else {
+            println!("Consider this an email to {} with code {}. Enter email details in config.toml to actually send email",sig.signed_message.unsigned.email,code); // TODO actually send email.
+        }
         let hash = {
             let data = serde_json::ser::to_string(&sig.signed_message).unwrap();
             let mut hasher = Sha256::default();

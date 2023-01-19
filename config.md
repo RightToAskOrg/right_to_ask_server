@@ -65,6 +65,28 @@ rta = "mysql://RightToAsk:stick-the-rta-password-here@localhost:3306/RightToAsk"
 bulletinboard = "mysql://bulletinboard:stick-the-bulletin-board-password-here@localhost:3306/bulletinboard"
 ```
 
+## Email configuration (optional for development)
 
+The server needs to send email to verify control of an email address. If the following is not set,
+then the code will be written to the server console. If the following is included, it will be emailed
+using an external SMTP server (connecting on the standard submission port 587 using STARTTLS and PLAIN authentication)
+
+```toml
+[email]
+# The email address that emails come from
+verification_from_email = "RightToAsk <verification@righttoask.org>"
+# The email address that "reply" will send to.
+verification_reply_to_email = "RightToAsk <verification@righttoask.org>"
+relay = "mail.righttoask.org" # The mail server that will do the sending. This is not a real one
+# optional, used for testing. If entered, then mail will be sent to this address instead of where it is supposed to go.
+# Do not use in a production system.
+testing_email_override = "tester@righttoask.org"
+
+[email.smtp_credentials]
+authentication_identity = "verification@righttoask.org"
+secret = "stick-your-password-here"
+```
+
+There is an intention of (optionally) allowing other credentials such as for AWS email.
 
 
