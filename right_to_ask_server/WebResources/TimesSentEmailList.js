@@ -10,6 +10,16 @@ function reset_times_sent(timescale) {
     getWebJSON("reset_times_sent",success,failure,JSON.stringify(timescale),"application/json");
 }
 
+function remove_specific_email() {
+    const email = document.getElementById("email").value;
+    function success(status) {
+        if (status.hasOwnProperty("Ok")) {
+            refreshList(0);
+            refreshList(1);
+        } else failure(status.Err);
+    }
+    getWebJSON("take_off_times_sent_list",success,failure,JSON.stringify({email:email}),"application/json");
+}
 
 function refreshList(timescale) {
     const div = document.getElementById("current_list_"+timescale);

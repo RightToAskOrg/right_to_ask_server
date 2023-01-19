@@ -402,6 +402,11 @@ impl EmailAddress {
         let mut conn = get_rta_database_connection().await.map_err(email_internal_error)?;
         conn.exec_map("select email,sent from EmailRateLimitHistory where timescale=?",(timescale,),|(email,sent)|TimesSent{email,sent}).map_err(internal_error_email)
     }
+
+    pub async fn take_off_times_sent_list(&self) -> Result<(),EmailValidationError> {
+        let mut conn = get_rta_database_connection().await.map_err(email_internal_error)?;
+        conn.exec_drop("delete from EmailRateLimitHistory where email=?",(&self.canonicalise_for_equality_check(),)).map_err(internal_error_email)
+    }
 }
 
 #[derive(Debug,Clone,Serialize)]

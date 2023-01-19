@@ -348,7 +348,10 @@ struct QueryTimescale {
 async fn get_times_sent(query:web::Query<QueryTimescale>) -> Json<Result<Vec<TimesSent>,String>> {
     Json(EmailAddress::get_times_sent(query.timescale).await.map_err(|e|e.to_string()))
 }
-
+#[post("/take_off_times_sent_list")]
+async fn take_off_times_sent_list(command : Json<EmailAddress>) -> Json<Result<(),String>> {
+    Json(command.take_off_times_sent_list().await.map_err(|e|e.to_string()))
+}
 
 
 #[actix_web::main]
@@ -400,6 +403,7 @@ async fn main() -> anyhow::Result<()> {
             .service(get_do_not_email_list)
             .service(reset_times_sent)
             .service(get_times_sent)
+            .service(take_off_times_sent_list)
             .service(actix_files::Files::new("/journal/", "journal").use_last_modified(true).use_etag(true).show_files_listing())
             .service(actix_files::Files::new("/", find_web_resources()).use_last_modified(true).use_etag(true).index_file("index.html"))
     })
