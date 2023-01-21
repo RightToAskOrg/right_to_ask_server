@@ -25,6 +25,7 @@ pub enum CensorshipReason {
     /// but you're not allowed to ask "When are you going to stop taking bribes"?
     DefamatoryInsinuation,
     Illegal,
+    Impersonation,
 }
 
 #[derive(Serialize,Deserialize,Debug,Clone)]
