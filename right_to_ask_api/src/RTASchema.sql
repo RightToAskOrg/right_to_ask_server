@@ -21,34 +21,45 @@ create table if not exists USERS
     INDEX(UID)
 ) CHARACTER SET utf8;
 
-create table if not exists ELECTORATES
+/* The definition of an electorate, referred to in UserElectorate by the id */
+create table if not exists ElectorateDefinition
 (
-    UID         VARCHAR(30) NOT NULL,
+    id  INTEGER PRIMARY KEY AUTO_INCREMENT NOT NULL,
     Chamber     ENUM('ACT_Legislative_Assembly',
-                     'Australian_House_Of_Representatives',
-                     'Australian_Senate',
-                     'NSW_Legislative_Assembly',
-                     'NSW_Legislative_Council',
-                     'NT_Legislative_Assembly',
-                     'Qld_Legislative_Assembly',
-                     'SA_House_Of_Assembly',
-                     'SA_Legislative_Council',
-                     'Vic_Legislative_Assembly',
-                     'Vic_Legislative_Council',
-                     'Tas_House_Of_Assembly',
-                     'Tas_Legislative_Council',
-                     'WA_Legislative_Assembly',
-                     'WA_Legislative_Council') NOT NULL,
-    Electorate  VARCHAR(50),
-    INDEX (UID)
-);
+        'Australian_House_Of_Representatives',
+        'Australian_Senate',
+        'NSW_Legislative_Assembly',
+        'NSW_Legislative_Council',
+        'NT_Legislative_Assembly',
+        'Qld_Legislative_Assembly',
+        'SA_House_Of_Assembly',
+        'SA_Legislative_Council',
+        'Vic_Legislative_Assembly',
+        'Vic_Legislative_Council',
+        'Tas_House_Of_Assembly',
+        'Tas_Legislative_Council',
+        'WA_Legislative_Assembly',
+        'WA_Legislative_Council') NOT NULL,
+    Electorate  VARCHAR(50) NOT NULL, /* If a chamber doesn't have electorates this is blank, as unique nulls are not enforced in MariaDB */
+    UNIQUE INDEX indexCE (Chamber,Electorate)
+) CHARACTER SET utf8;
+
+/* The electorates that a particular user is in */
+create table if not exists UserElectorate
+(
+    user_id INTEGER NOT NULL,
+    electorate_id INTEGER NOT NULL,
+    INDEX(user_id),
+    CONSTRAINT FOREIGN KEY (user_id) REFERENCES USERS (id) ON DELETE CASCADE ON UPDATE RESTRICT,
+    CONSTRAINT FOREIGN KEY (electorate_id) REFERENCES ElectorateDefinition (id) ON DELETE CASCADE ON UPDATE RESTRICT
+) CHARACTER SET utf8;
 
 create table if not exists BADGES
 (
-    UID         VARCHAR(30) NOT NULL,
     badge       ENUM('EmailDomain','MP','MPStaff') NOT NULL,
     what        TEXT NOT NULL,
-    INDEX (UID)
+    user_id     INTEGER NOT NULL,
+    foreign key (user_id) REFERENCES USERS (id) ON DELETE CASCADE ON UPDATE RESTRICT
 );
 
 create table if not exists QUESTIONS
@@ -58,7 +69,7 @@ create table if not exists QUESTIONS
     CreatedTimestamp BIGINT UNSIGNED NOT NULL,
     LastModifiedTimestamp BIGINT UNSIGNED NOT NULL,
     Version     BINARY(32) NULL, /* a bulletin board reference. Will only briefly be null. */
-    CreatedBy   VARCHAR(30) NOT NULL, /* reference to UID in Users table */
+    CreatedById INTEGER NOT NULL,
     Background  TEXT NULL,
     CanOthersSetWhoShouldAsk BOOLEAN NOT NULL,
     CanOthersSetWhoShouldAnswer BOOLEAN NOT NULL,
@@ -68,15 +79,15 @@ create table if not exists QUESTIONS
     TotalVotes  INT NOT NULL DEFAULT 0,
     NetVotes    INT NOT NULL DEFAULT 0,
     INDEX(LastModifiedTimestamp),
-    INDEX(CreatedBy)
+    foreign key (CreatedById) REFERENCES USERS (id) ON DELETE CASCADE ON UPDATE RESTRICT
 ) CHARACTER SET utf8;
 
 create table if not exists HAS_VOTED
 (
     QuestionId  BINARY(32) NOT NULL, /* The hash of the question defining fields */
-    Voter       VARCHAR(30) NOT NULL, /* reference to UID in Users table */
-    INDEX(QuestionId),
-    INDEX(Voter)
+    VoterId INTEGER NOT NULL, /* reference to id in Users table */
+    constraint foreign key (QuestionId) REFERENCES QUESTIONS (QuestionId) ON DELETE CASCADE ON UPDATE RESTRICT,
+    constraint foreign key (VoterId) REFERENCES USERS (id) ON DELETE CASCADE ON UPDATE RESTRICT
 ) CHARACTER SET utf8;
 
 create table if not exists MP_IDs(
@@ -165,33 +176,35 @@ create table if not exists PersonForQuestion
 (
     QuestionId  BINARY(32), /* reference to QuestionID in QUESTIONS table */
     ROLE CHAR(1), /* Q = ask question, A = answer question */
-    UID VARCHAR(30) NULL,/* reference to UID in Users table, if it is a user */
+    UserId INTEGER NULL,/* reference to id in Users table, if it is a user */
     MP INT NULL, /* reference to an MP in MP_IDs table, if it is an MP */
     ORG INT NULL, /* reference to an organisation in Organisations table, if it is an organisation */
     Committee INT NULL, /* reference to a committee in Committee_IDs table, if it is a committee */
     Minister INT NULL, /* reference to a minister in Minister_IDs table, if it is a minister */
-    INDEX(QuestionId)
+    foreign key (QuestionId) REFERENCES QUESTIONS (QuestionId) ON DELETE CASCADE ON UPDATE RESTRICT,
+    constraint foreign key (UserId) REFERENCES USERS (id) ON DELETE CASCADE ON UPDATE RESTRICT
 ) CHARACTER SET utf8;
 
 create table if not exists Answer
 (
     QuestionId  BINARY(32), /* reference to QuestionID in QUESTIONS table */
-    author      VARCHAR(30) NOT NULL, /* reference to UID in Users table */
+    AuthorId    INTEGER NOT NULL, /* reference to id in Users table */
     MP          INT NOT NULL, /* reference to an MP in MP_IDs table */
     timestamp   BIGINT UNSIGNED NOT NULL,
     answer      TEXT NOT NULL,
     version     BINARY(32), /* when the answer was created. Used as a key for censoring */
     censored    BOOLEAN NOT NULL DEFAULT FALSE,
     INDEX(version),
-    INDEX(QuestionId),
-    INDEX(MP)
+    foreign key (QuestionId) REFERENCES QUESTIONS (QuestionId) ON DELETE CASCADE ON UPDATE RESTRICT,
+    INDEX(MP),
+    constraint foreign key (AuthorId) REFERENCES USERS (id) ON DELETE CASCADE ON UPDATE RESTRICT
 ) CHARACTER SET utf8;
 
 create table HansardLink
 (
     QuestionId  BINARY(32), /* reference to QuestionID in QUESTIONS table */
     url         TEXT, /* The URL */
-    INDEX(QuestionId)
+    foreign key (QuestionId) REFERENCES QUESTIONS (QuestionId) ON DELETE CASCADE ON UPDATE RESTRICT
 ) CHARACTER SET utf8;
 
 /**

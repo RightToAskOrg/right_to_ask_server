@@ -12,7 +12,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use lettre::Message;
 use lettre::message::{Mailbox, MultiPart, SinglePart};
-use mysql::{TxOpts, Value, FromValueError};
+use mysql::{TxOpts, Value, FromValueError, Transaction};
 use crate::database::{get_rta_database_connection, LogInBulletinBoard};
 use mysql::prelude::{Queryable, ConvIr, FromValue};
 use merkle_tree_bulletin_board::hash::HashValue;
@@ -24,8 +24,10 @@ use crate::mp::MPSpec;
 use crate::signing::ClientSigned;
 use crate::time_limited_hashmap::TimeLimitedHashMap;
 
-/// A unique ID identifying a person.
+/// A unique ID identifying a person that is presented to the API. It can very rarely change.
 pub type UserUID = String;
+/// An internal unique perpetually unchanging user identifier
+pub type UserID = u64;
 
 pub type PublicKey=String;
 /// Signature encodings
@@ -63,6 +65,7 @@ pub enum RegistrationError {
     DisplayNameTooLong,
     InternalError,
     CouldNotWriteToBulletinBoard,
+    NoSuchUser, // when editing a user. Unlikely to ever occur except when a concurrent UID change is happening.
 }
 fn bulletin_board_error(error:anyhow::Error) -> RegistrationError {
     eprintln!("Bulletin Board error {:?}",error);
@@ -92,6 +95,7 @@ pub struct UserInfo {
 #[derive(Debug,Clone,Serialize,Deserialize,Eq,PartialEq)]
 /// Like UserInfo, but less info. For searches.
 pub struct MiniUserInfo {
+    id : u64,
     uid : UserUID,
     #[serde(default,skip_serializing_if = "Option::is_none")]
     display_name : Option<String>,
@@ -119,25 +123,23 @@ pub struct Badge {
 
 impl Badge {
     /// Add a badge to the database
-    async fn store_in_database(&self,uid:&str) -> mysql::Result<()> {
-        let mut conn = get_rta_database_connection().await?;
-        let mut tx = conn.start_transaction(TxOpts::default())?;
-        tx.exec_drop("insert into BADGES (UID,badge,what) values (?,?,?)",(uid,&self.badge,&self.name))?;
-        tx.commit()?;
+    fn store_in_database(&self,user_id:u64,transaction:&mut Transaction) -> mysql::Result<()> {
+        transaction.exec_drop("insert into BADGES (user_id,badge,what) values (?,?,?)",(user_id,&self.badge,&self.name))?;
         Ok(())
     }
     /// removes a badge from the database.
-    async fn remove_from_database(&self,uid:&str) -> mysql::Result<()> {
-        let mut conn = get_rta_database_connection().await?;
-        let mut tx = conn.start_transaction(TxOpts::default())?;
-        tx.exec_drop("delete from BADGES where UID=? and badge=? and what=?",(uid,&self.badge,&self.name))?;
-        tx.commit()?;
+    fn remove_from_database(&self,user_id:u64,transaction:&mut Transaction) -> mysql::Result<()> {
+        transaction.exec_drop("delete from BADGES where user_id=? and badge=? and what=?",(user_id,&self.badge,&self.name))?;
         Ok(())
     }
     /// See if a badge is already in the database.
-    async fn is_in_database(&self,uid:&str) -> mysql::Result<bool> {
+    fn is_in_database(&self,user_id:u64,transaction:&mut Transaction) -> mysql::Result<bool> {
+        let count : Option<usize> = transaction.exec_first("select COUNT(user_id) from BADGES where user_id=? and badge=? and what=?",(user_id,&self.badge,&self.name))?;
+        Ok(count.is_some() && count.unwrap()>0)
+    }
+    async fn is_in_database_simple(&self,uid:&str) -> mysql::Result<bool> {
         let mut conn = get_rta_database_connection().await?;
-        let count : Option<usize> = conn.exec_first("select COUNT(UID) from BADGES where UID=? and badge=? and what=?",(uid,&self.badge,&self.name))?;
+        let count : Option<usize> = conn.exec_first("select COUNT(user_id) from BADGES inner join USERS ON BADGES.user_id=USERS.id where USERS.UID=? and BADGES.badge=? and BADGES.what=?",(uid,&self.badge,&self.name))?;
         Ok(count.is_some() && count.unwrap()>0)
     }
 }
@@ -184,15 +186,19 @@ impl fmt::Display for RegistrationError {
 }
 
 impl NewRegistration {
-    async fn store_in_database(&self) -> mysql::Result<()> {
+    /// result is true if ok, false if the UID already taken.
+    async fn store_in_database(&self) -> anyhow::Result<bool> {
         let mut conn = get_rta_database_connection().await?;
         let mut tx = conn.start_transaction(TxOpts::default())?;
-        tx.exec_drop("insert into USERS (UID,DisplayName,PublicKey,AusState) values (?,?,?,?)",(&self.uid,&self.display_name,&self.public_key,self.state.map(|s|s.to_string())))?;
-        for e in &self.electorates {
-            tx.exec_drop("insert into ELECTORATES (UID,Chamber,Electorate) values (?,?,?)",(&self.uid,&e.chamber.to_string(),&e.region))?;
+        match tx.exec_drop("insert into USERS (UID,DisplayName,PublicKey,AusState) values (?,?,?,?)",(&self.uid,&self.display_name,&self.public_key,self.state.map(|s|s.to_string()))) {
+            Err(mysql::Error::MySqlError(e)) if e.code==1062 => {return Ok(false); }
+            Ok(_) => {}
+            Err(e) => { Err(e)?; } // returns immediately.
         }
+        let user_id = tx.exec_first("select LAST_INSERT_ID()",())?.ok_or_else(||anyhow!("no LAST_INSERT_ID() in NewRegistration::store_in_database()"))?;
+        EditUserDetails::add_electorates(user_id,&self.electorates,&mut tx)?;
         tx.commit()?;
-        Ok(())
+        Ok(true)
     }
 
     pub async fn register(&self) -> Result<HashValue,RegistrationError> {
@@ -202,14 +208,8 @@ impl NewRegistration {
             if dn.len()<1 { return Err(RegistrationError::DisplayNameTooShort); }
             if dn.len()>60 { return Err(RegistrationError::DisplayNameTooLong); }
         }
-        match self.store_in_database().await {
-            Ok(_) => {}
-            Err(mysql::Error::MySqlError(e)) if e.code==1062 => {return Err(RegistrationError::UIDAlreadyTaken)}
-            Err(e) => {
-                println!("Error with SQL : {}",e);
-                return Err(RegistrationError::InternalError);
-            }
-        }
+        let uid_available = self.store_in_database().await.map_err(internal_error)?;
+        if !uid_available { return Err(RegistrationError::UIDAlreadyTaken) }
         let hash = LogInBulletinBoard::NewUser(self.clone()).log_in_bulletin_board().await.map_err(bulletin_board_error)?;
         println!("Registered uid={} display_name={:?} state={:?} electorates={:?} public_key={}",self.uid,self.display_name,self.state,self.electorates,self.public_key);
         Ok(hash)
@@ -230,9 +230,9 @@ pub async fn get_count_of_all_users() -> mysql::Result<usize> {
 
 pub async fn get_user_by_id(uid:&UserUID) -> mysql::Result<Option<UserInfo>> {
     let mut conn = get_rta_database_connection().await?;
-    let electorates = conn.exec_map("SELECT Chamber,Electorate from ELECTORATES where UID=?",(uid,),|(chamber,location)|Electorate{ chamber, region: location })?;
-    let badges = conn.exec_map("SELECT badge,what from BADGES where UID=?",(uid,),|(badge,name)|Badge{ badge, name })?;
-    if let Some((display_name,state,public_key)) = conn.exec_first("SELECT DisplayName,AusState,PublicKey from USERS where UID=?",(uid,))? {
+    if let Some((user_id,display_name,state,public_key)) = conn.exec_first::<(u64,Option<String>,Option<State>,PublicKey),_,_>("SELECT id,DisplayName,AusState,PublicKey from USERS where UID=?",(uid,))? {
+        let electorates = conn.exec_map("SELECT Chamber,Electorate from UserElectorate inner join ElectorateDefinition on UserElectorate.electorate_id = ElectorateDefinition.id where UserElectorate.user_id=?",(user_id,),|(chamber,location)|Electorate{ chamber, region: location })?;
+        let badges = conn.exec_map("SELECT badge,what from BADGES where user_id=?",(user_id,),|(badge,name)|Badge{ badge, name })?;
         Ok(Some(UserInfo{
             uid : uid.to_string(),
             display_name,
@@ -249,20 +249,14 @@ pub async fn get_user_by_id(uid:&UserUID) -> mysql::Result<Option<UserInfo>> {
 pub async fn search_for_users(search:&str,want_badges:bool) -> mysql::Result<Vec<MiniUserInfo>> {
     let mut conn = get_rta_database_connection().await?;
     let query = "%".to_string()+&search.replace('!',"!!").replace('_',"!_").replace('%',"!%").replace('[',"![").to_uppercase()+"%";
-    let mut res : Vec<MiniUserInfo> = conn.exec_map("SELECT UID,DisplayName from USERS where (UPPER(UID) like ? escape '!') or (UPPER(DisplayName) like ? escape '!')",(&query,&query),|(uid,display_name)|MiniUserInfo{uid,display_name,badges:vec![] })?;
+    let mut res : Vec<MiniUserInfo> = conn.exec_map("SELECT id,UID,DisplayName from USERS where (UPPER(UID) like ? escape '!') or (UPPER(DisplayName) like ? escape '!')",(&query,&query),|(id,uid,display_name)|MiniUserInfo{id,uid,display_name,badges:vec![] })?;
     if want_badges {
         for user in &mut res {
-            let badges = conn.exec_map("SELECT badge,what from BADGES where UID=?",(&user.uid,),|(badge,name)|Badge{ badge, name })?;
+            let badges = conn.exec_map("SELECT badge,what from BADGES where user_id=?",(user.id,),|(badge,name)|Badge{ badge, name })?;
             user.badges=badges;
         }
     }
     Ok(res)
-}
-
-pub async fn is_user_mp_or_staffer(uid:&UserUID) -> mysql::Result<bool> {
-    let mut conn = get_rta_database_connection().await?;
-    let badges = conn.exec_map("SELECT badge,what from BADGES where UID=?",(uid,),|(badge,name)|Badge{ badge, name })?;
-    Ok(badges.iter().any(|b|b.badge==BadgeType::MP || b.badge==BadgeType::MPStaff))
 }
 
 /// see if a given uid is a valid user.
@@ -294,6 +288,7 @@ pub enum EmailValidationError {
     SentTooFrequentlyThisMonth,
     InvalidEmailAddress,
     CouldNotSendEmail,
+    NoSuchUser, // unlikely to ever occur if passed signature test.
 }
 
 impl fmt::Display for EmailValidationError {
@@ -439,10 +434,10 @@ impl RequestEmailValidation {
         let badge = RequestEmailValidation::get_badge(sig)?;
         match sig.parsed.why.get_type() {
             EmailValidationType::GainBadge => {
-                if badge.is_in_database(&sig.signed_message.user).await.map_err(internal_error_email)? { return Err(EmailValidationError::AlreadyHaveBadge); }
+                if badge.is_in_database_simple(&sig.signed_message.user).await.map_err(internal_error_email)? { return Err(EmailValidationError::AlreadyHaveBadge); }
             },
             EmailValidationType::RevokeBadge(uid) => {
-                if !badge.is_in_database(&uid).await.map_err(internal_error_email)? { return Err(EmailValidationError::DoesNotHaveBadgeToRevoke); }
+                if !badge.is_in_database_simple(&uid).await.map_err(internal_error_email)? { return Err(EmailValidationError::DoesNotHaveBadgeToRevoke); }
             },
             EmailValidationType::AccountRecovery => {}
         }
@@ -577,17 +572,22 @@ impl EmailProof {
             if *code!=sig.parsed.code { return Err(EmailValidationError::WrongCode)}
             let badge = RequestEmailValidation::get_badge(initial_request)?;
             // successfully verified!
+            let mut conn = get_rta_database_connection().await.map_err(internal_error_email)?;
+            let mut transaction = conn.start_transaction(TxOpts::default()).map_err(internal_error_email)?;
+            let user_id = get_user_id(&initial_request.signed_message.user,EmailValidationError::NoSuchUser,EmailValidationError::InternalError,&mut transaction)?;
             match initial_request.parsed.why.get_type() {
                 EmailValidationType::GainBadge => {
-                    if badge.is_in_database(&initial_request.signed_message.user).await.map_err(internal_error_email)? { return Err(EmailValidationError::AlreadyHaveBadge); }
-                    badge.store_in_database(&initial_request.signed_message.user).await.map_err(internal_error_email)?
+                    if badge.is_in_database(user_id,&mut transaction).map_err(internal_error_email)? { return Err(EmailValidationError::AlreadyHaveBadge); }
+                    badge.store_in_database(user_id,&mut transaction).map_err(internal_error_email)?
                 },
                 EmailValidationType::RevokeBadge(uid) => {
-                    if !badge.is_in_database(&uid).await.map_err(internal_error_email)? { return Err(EmailValidationError::DoesNotHaveBadgeToRevoke); }
-                    badge.remove_from_database(&uid).await.map_err(internal_error_email)?
+                    let revoked_user_id = get_user_id(&uid,EmailValidationError::NoSuchUser,EmailValidationError::InternalError,&mut transaction)?;
+                    if !badge.is_in_database(revoked_user_id,&mut transaction).map_err(internal_error_email)? { return Err(EmailValidationError::DoesNotHaveBadgeToRevoke); }
+                    badge.remove_from_database(revoked_user_id,&mut transaction).map_err(internal_error_email)?
                 },
                 EmailValidationType::AccountRecovery => {} // TODO we haven't worked out how account recovery works yet.
             }
+            transaction.commit().map_err(internal_error_email)?;
             let bb_hash = LogInBulletinBoard::EmailVerification(initial_request.signed_message.just_signed_part()).log_in_bulletin_board().await.map_err(bulletin_board_error_email)?;
             Ok(Some(bb_hash))
         } else { Err(EmailValidationError::NoCodeOrExpired)}
@@ -605,28 +605,44 @@ pub struct EditUserDetails {
     electorates : Option<Vec<Electorate>>,
 }
 
+pub (crate) fn get_user_id<T>(uid:&str,no_such_user_error:T,sql_error:T,transaction:&mut impl Queryable) -> Result<UserID,T> {
+    match transaction.exec_first("select id from USERS where UID=?",(uid,)) {
+        Err(e) => {println!("Internal error in get_user_id : {}",e); Err(sql_error)}
+        Ok(Some(v)) => Ok(v),
+        Ok(None) => Err(no_such_user_error),
+    }
+}
+
 impl EditUserDetails {
     /// Change the user details, returning the bulletin board entry.
     pub async fn edit_user(edits:&ClientSigned<EditUserDetails>) -> Result<HashValue,RegistrationError> {
         let mut conn = get_rta_database_connection().await.map_err(internal_error)?;
         let mut transaction = conn.start_transaction(TxOpts::default()).map_err(internal_error)?;
+        let user_id : u64 = get_user_id(&edits.signed_message.user,RegistrationError::NoSuchUser,RegistrationError::InternalError,&mut transaction)?;
         if let Some(display_name) = &edits.parsed.display_name {
             if display_name.len()<1 { return Err(RegistrationError::DisplayNameTooShort); }
             if display_name.len()>60 { return Err(RegistrationError::DisplayNameTooLong); }
             // Set display name
-            transaction.exec_drop("update USERS set DisplayName=? where UID=?", (display_name,&edits.signed_message.user)).map_err(internal_error)?;
+            transaction.exec_drop("update USERS set DisplayName=? where id=?", (display_name,user_id)).map_err(internal_error)?;
         }
         if let Some(state) = &edits.parsed.state {
-            transaction.exec_drop("update USERS set AusState=? where UID=?", (state.map(|s|s.to_string()),&edits.signed_message.user)).map_err(internal_error)?;
+            transaction.exec_drop("update USERS set AusState=? where id=?", (state.map(|s|s.to_string()),user_id)).map_err(internal_error)?;
         }
         if let Some(electorates) = &edits.parsed.electorates {
-            transaction.exec_drop("delete from ELECTORATES where UID=?", (&edits.signed_message.user,)).map_err(internal_error)?;
-            for e in electorates {
-                transaction.exec_drop("insert into ELECTORATES (UID,Chamber,Electorate) values (?,?,?)",(&edits.signed_message.user,&e.chamber.to_string(),&e.region)).map_err(internal_error)?;
-            }
+            transaction.exec_drop("delete from UserElectorate where user_id=?", (user_id,)).map_err(internal_error)?;
+            Self::add_electorates(user_id,electorates,&mut transaction).map_err(internal_error)?;
         }
         transaction.commit().map_err(internal_error)?;
         let version = LogInBulletinBoard::EditUser(edits.signed_message.clone()).log_in_bulletin_board().await.map_err(bulletin_board_error)?;
         Ok(version)
+    }
+
+    fn add_electorates(user_id:u64,electorates:&[Electorate],transaction:&mut Transaction) -> anyhow::Result<()> {
+        for e in electorates {
+            transaction.exec_drop("insert ignore into ElectorateDefinition (Chamber,Electorate) values (?,?)",(&e.chamber.to_string(),&e.region))?;
+            let electorate_id : u64 = transaction.exec_first("select id from ElectorateDefinition where (Chamber=?) and (Electorate=?)",(&e.chamber.to_string(),&e.region))?.ok_or_else(||anyhow!("Could not find just inserted electorate"))?;
+            transaction.exec_drop("insert into UserElectorate (user_id,electorate_id) values (?,?)",(user_id,electorate_id))?;
+        }
+        Ok(())
     }
 }

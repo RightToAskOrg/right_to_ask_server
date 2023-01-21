@@ -27,7 +27,7 @@ use crate::config::CONFIG;
 use crate::database::{add_question_to_comparison_database, find_similar_text_question, get_rta_database_connection, LogInBulletinBoard};
 use crate::minister::{MinisterId, MinisterIndexInDatabaseTable};
 use crate::mp::{get_org_id_from_database, MPId, MPIndexInDatabaseTable, MPSpec, OrgIndexInDatabaseTable};
-use crate::person::{user_exists, UserUID};
+use crate::person::{get_user_id, user_exists, UserID, UserUID};
 use crate::signing::ClientSigned;
 
 /// A question ID is a hash of the question text, the question writer, and the upload timestamp.
@@ -85,6 +85,8 @@ pub enum QuestionError {
     /// The Hansard link URL does not satisfy the sanitization filters.
     HansardLinkIsNotAllowed,
     AlreadyVoted,
+    /// The question author doesn't exist. Mainly happens if submitting a new question at the same time as changing UID.
+    NoSuchUser,
 }
 
 impl Display for QuestionError {
@@ -173,7 +175,7 @@ pub enum PersonID {
 impl PersonID {
     /// Get the people who should ask (role='Q') or answer (role='A') a question.
     fn get_for_question(conn:&mut impl Queryable,role:char,question:QuestionID) -> mysql::Result<Vec<PersonID>> {
-        let elements : Vec<(Option<UserUID>,Option<MPIndexInDatabaseTable>,Option<OrgIndexInDatabaseTable>,Option<CommitteeIndexInDatabaseTable>,Option<MinisterIndexInDatabaseTable>)> = conn.exec_map("SELECT UID,MP,ORG,Committee,Minister from PersonForQuestion where QuestionId=? and ROLE=?",(&question.0,role.to_string()),|(uid,mp,org,committee,minister)|(uid,mp,org,committee,minister))?;
+        let elements : Vec<(Option<UserUID>,Option<MPIndexInDatabaseTable>,Option<OrgIndexInDatabaseTable>,Option<CommitteeIndexInDatabaseTable>,Option<MinisterIndexInDatabaseTable>)> = conn.exec_map("SELECT USERS.UID,MP,ORG,Committee,Minister from PersonForQuestion inner join USERS ON PersonForQuestion.UserId=USERS.id where QuestionId=? and ROLE=?",(&question.0,role.to_string()),|(uid,mp,org,committee,minister)|(uid,mp,org,committee,minister))?;
         let mut res = vec![];
         for (uid,mp,org,committee,minister) in elements {
             let decoded = {
@@ -216,33 +218,34 @@ impl PersonID {
         Ok(res)
     }
     /// Add the given people to a given question.
-    fn add_for_question(conn:&mut impl Queryable,role:char,question:QuestionID,people:HashSet<&PersonID>) -> mysql::Result<()> {
-        let mut references : Vec<(Option<UserUID>,Option<MPIndexInDatabaseTable>,Option<OrgIndexInDatabaseTable>,Option<CommitteeIndexInDatabaseTable>,Option<MinisterIndexInDatabaseTable>)> = vec![];
+    fn add_for_question(conn:&mut impl Queryable,role:char,question:QuestionID,people:HashSet<&PersonID>) -> Result<(),QuestionError> {
+        let mut references : Vec<(Option<UserID>,Option<MPIndexInDatabaseTable>,Option<OrgIndexInDatabaseTable>,Option<CommitteeIndexInDatabaseTable>,Option<MinisterIndexInDatabaseTable>)> = vec![];
         for &person in people.iter() {
             match person {
                 PersonID::User(uid) => {
-                    references.push((Some(uid.clone()),None,None,None,None));
+                    let user_id = get_user_id(uid,QuestionError::NoSuchUser,QuestionError::InternalError,conn)?;
+                    references.push((Some(user_id),None,None,None,None));
                 }
                 PersonID::MP(mp_id) => {
-                    let id = mp_id.get_id_from_database(conn)?;
+                    let id = mp_id.get_id_from_database(conn).map_err(internal_error)?;
                     references.push((None,Some(id),None,None,None));
                 }
                 PersonID::Organisation(org_name) => {
-                    let id = get_org_id_from_database(org_name,conn)?;
+                    let id = get_org_id_from_database(org_name,conn).map_err(internal_error)?;
                     references.push((None,None,Some(id),None,None));
                 }
                 PersonID::Committee(committee_id) => {
-                    let id = committee_id.get_id_from_database(conn)?;
+                    let id = committee_id.get_id_from_database(conn).map_err(internal_error)?;
                     references.push((None,None,None,Some(id),None));
                 }
                 PersonID::Minister(minister_id) => {
-                    let id = minister_id.get_id_from_database(conn)?;
+                    let id = minister_id.get_id_from_database(conn).map_err(internal_error)?;
                     references.push((None,None,None,None,Some(id)));
                 }
             }
         }
         let role = role.to_string();
-        conn.exec_batch("insert into PersonForQuestion (QuestionId,ROLE,UID,MP,ORG,Committee,Minister) values (?,?,?,?,?,?,?)",references.into_iter().map(|(uid,mp,org,committee,minister)|(question.0,&role,uid,mp,org,committee,minister)))?;
+        conn.exec_batch("insert into PersonForQuestion (QuestionId,ROLE,UserId,MP,ORG,Committee,Minister) values (?,?,?,?,?,?,?)",references.into_iter().map(|(user_id,mp,org,committee,minister)|(question.0,&role,user_id,mp,org,committee,minister))).map_err(internal_error)?;
         Ok(())
     }
 
@@ -358,7 +361,7 @@ pub struct QuestionAnswer {
 impl QuestionAnswer {
     /// Get the answers to a question.
     fn get_for_question(conn:&mut impl Queryable,question:QuestionID) -> mysql::Result<Vec<QuestionAnswer>> {
-        let entries : Vec<(UserUID,MPIndexInDatabaseTable,Timestamp,String,bool,mysql::Value)> = conn.exec("SELECT author,mp,timestamp,answer,censored,version from Answer where QuestionId=? order by timestamp",(&question.0,))?;
+        let entries : Vec<(UserUID,MPIndexInDatabaseTable,Timestamp,String,bool,mysql::Value)> = conn.exec("SELECT USERS.UID,mp,timestamp,answer,censored,version from Answer inner join USERS ON Answer.AuthorId=USERS.id where QuestionId=? order by timestamp",(&question.0,))?;
         let mut res : Vec<QuestionAnswer> = vec![];
         for (answered_by,mp,timestamp,answer,censored,version) in entries {
             if let Some(mp_id) = MPId::read_from_database(conn,mp)? {
@@ -370,9 +373,10 @@ impl QuestionAnswer {
         Ok(res)
     }
     /// Add a given answer to the database.
-    fn add_for_question(&self,conn:&mut impl Queryable,question:QuestionID,timestamp:Timestamp,uid:&UserUID,version:HashValue) -> mysql::Result<()> {
-        let mp = self.mp.get_id_from_database(conn)?;
-        conn.exec_drop("insert into Answer (QuestionId,author,mp,timestamp,answer,version) values (?,?,?,?,?,?)",(&question.0,uid,mp,timestamp,&self.answer,&version.0))?;
+    fn add_for_question(&self,conn:&mut impl Queryable,question:QuestionID,timestamp:Timestamp,uid:&UserUID,version:HashValue) -> Result<(),QuestionError> {
+        let mp = self.mp.get_id_from_database(conn).map_err(internal_error)?;
+        let user_id = get_user_id(uid,QuestionError::NoSuchUser,QuestionError::InternalError,conn)?;
+        conn.exec_drop("insert into Answer (QuestionId,AuthorId,mp,timestamp,answer,version) values (?,?,?,?,?,?)",(&question.0,user_id,mp,timestamp,&self.answer,&version.0)).map_err(internal_error)?;
         Ok(())
     }
 
@@ -381,7 +385,7 @@ impl QuestionAnswer {
         if self.answered_by.is_some() || self.timestamp.is_some() || self.censored || self.version.is_some() { return Err(QuestionError::AnswerContainsUndesiredFields); }
         let mps = MPSpec::get().map_err(internal_error)?;
         if let Some(mp) = mps.find(&self.mp) {
-            let badges : usize = conn.exec_first("SELECT COUNT(badge) from BADGES where UID=? and what=? and (badge='MP' || badge='MPStaff')",(uid,mp.badge_name())).map_err(internal_error)?.ok_or_else(||QuestionError::InternalError)?;
+            let badges : usize = conn.exec_first("SELECT COUNT(badge) from BADGES inner join USERS ON BADGES.user_id=USERS.id where USERS.UID=? and BADGES.what=? and (BADGES.badge='MP' || BADGES.badge='MPStaff')",(uid,mp.badge_name())).map_err(internal_error)?.ok_or_else(||QuestionError::InternalError)?;
             if badges==0 { return Err(QuestionError::UserDoesNotHaveCorrectMPBadge); }
         } else  { return Err(QuestionError::InvalidMP); }
         Ok(())
@@ -522,19 +526,19 @@ impl QuestionNonDefiningFields {
             let existing = PersonID::get_for_question(&mut transaction,'Q',question_id).map_err(internal_error)?.into_iter().collect::<HashSet<_>>();
             let extra : HashSet<_> = self.mp_who_should_ask_the_question.iter().filter(|&m|!existing.contains(m)).collect();
             if existing.len()+extra.len() > MAX_MPS_WHO_SHOULD_ASK_THE_QUESTION { return Err(QuestionError::TooLongListOfPeopleAskingQuestion);}
-            PersonID::add_for_question(&mut transaction,'Q',question_id,extra).map_err(internal_error)?;
+            PersonID::add_for_question(&mut transaction,'Q',question_id,extra)?;
         }
         if !self.entity_who_should_answer_the_question.is_empty() {
             let existing = PersonID::get_for_question(&mut transaction,'A',question_id).map_err(internal_error)?.into_iter().collect::<HashSet<_>>();
             let extra : HashSet<_> = self.entity_who_should_answer_the_question.iter().filter(|&m|!existing.contains(m)).collect();
             if existing.len()+extra.len() > MAX_MPS_WHO_SHOULD_ASK_THE_QUESTION { return Err(QuestionError::TooLongListOfPeopleAskingQuestion);}
-            PersonID::add_for_question(&mut transaction,'A',question_id,extra).map_err(internal_error)?;
+            PersonID::add_for_question(&mut transaction,'A',question_id,extra)?;
         }
         if let Some(follow_up_to) = self.is_followup_to {
             transaction.exec_drop("update QUESTIONS set FollowUpTo=? where QuestionID=?", (follow_up_to.0,question_id.0)).map_err(internal_error)?;
         }
         for a in &self.answers {
-            a.add_for_question(&mut transaction,question_id,timestamp,uid,new_version).map_err(internal_error)?;
+            a.add_for_question(&mut transaction,question_id,timestamp,uid,new_version)?;
         }
         if self.answer_accepted {
             // There could be optimization here checking if it was already set.
@@ -573,7 +577,7 @@ impl QuestionNonDefiningFields {
     /// get questions that have a given person in a given role (questioner or answerer)
     fn find_questions_by_person_in_role(conn:&mut impl Queryable,role:&str,person:&PersonID) -> mysql::Result<Vec<QuestionID>> {
         match person {
-            PersonID::User(who) => conn.exec_map("select QuestionId from PersonForQuestion where ROLE=? and UID=?",(role,who),|(v,)|hash_from_value(v)),
+            PersonID::User(who) => conn.exec_map("select QuestionId from PersonForQuestion inner join USERS ON PersonForQuestion.UserId=USERS.id where ROLE=? and USERS.UID=?",(role,who),|(v,)|hash_from_value(v)),
             PersonID::MP(who) => {
                 if let Some(id) = who.get_id_from_database_if_there(conn)? {
                     conn.exec_map("select QuestionId from PersonForQuestion where ROLE=? and MP=?",(role,id),|(v,)|hash_from_value(v))
@@ -677,10 +681,11 @@ impl NewQuestionCommand {
         let question_id = defining.compute_hash();
         let mut conn = get_rta_database_connection().await.map_err(internal_error)?;
         let mut transaction = conn.start_transaction(TxOpts::default()).map_err(internal_error)?;
-        if let Some(existing_timestamp) = transaction.exec_first::<Timestamp,_,_>("select CreatedTimestamp from QUESTIONS where Question=? and CreatedBy=? ORDER BY CreatedTimestamp DESC",(question,user)).map_err(internal_error)? {
+        let user_id = get_user_id(user,QuestionError::NoSuchUser,QuestionError::InternalError,&mut transaction)?;
+        if let Some(existing_timestamp) = transaction.exec_first::<Timestamp,_,_>("select CreatedTimestamp from QUESTIONS where Question=? and CreatedById=? ORDER BY CreatedTimestamp DESC",(question,user_id)).map_err(internal_error)? {
             if existing_timestamp+24*60*60 > timestamp { return Err(QuestionError::YouJustAskedThatQuestion)}
         }
-        transaction.exec_drop("insert into QUESTIONS (QuestionID,Question,CreatedTimestamp,LastModifiedTimestamp,CreatedBy,CanOthersSetWhoShouldAsk,CanOthersSetWhoShouldAnswer,AnswerAccepted) values (?,?,?,?,?,FALSE,FALSE,FALSE)", (question_id.0,question,timestamp,timestamp,user)).map_err(internal_error)?;
+        transaction.exec_drop("insert into QUESTIONS (QuestionID,Question,CreatedTimestamp,LastModifiedTimestamp,CreatedById,CanOthersSetWhoShouldAsk,CanOthersSetWhoShouldAnswer,AnswerAccepted) values (?,?,?,?,?,FALSE,FALSE,FALSE)", (question_id.0,question,timestamp,timestamp,user_id)).map_err(internal_error)?;
         transaction.commit().map_err(internal_error)?;
         Ok(question_id)
     }
@@ -760,7 +765,7 @@ impl QuestionInfo {
         // Use less pleasant HList another way to handle wide rows is to use HList (requires `mysql_common/frunk` feature)
         use mysql_common::frunk::{HList, hlist_pat};
         type RowType = HList!(String, Timestamp, Timestamp, mysql::Value, String, Option<String>, bool, bool, bool,  mysql::Value, bool,u32,i32);
-        if let Some(hlist_pat![question_text,timestamp,last_modified,version,author,background,who_should_ask_the_question_permissions,who_should_answer_the_question_permissions,answer_accepted,is_followup_to,censored,total_votes,net_votes]) = conn.exec_first::<RowType,_,_>("SELECT Question,CreatedTimestamp,LastModifiedTimestamp,Version,CreatedBy,Background,CanOthersSetWhoShouldAsk,CanOthersSetWhoShouldAnswer,AnswerAccepted,FollowUpTo,censored,TotalVotes,NetVotes from QUESTIONS where QuestionID=?",(question_id.0,)).map_err(internal_error)? {
+        if let Some(hlist_pat![question_text,timestamp,last_modified,version,author,background,who_should_ask_the_question_permissions,who_should_answer_the_question_permissions,answer_accepted,is_followup_to,censored,total_votes,net_votes]) = conn.exec_first::<RowType,_,_>("SELECT Question,CreatedTimestamp,LastModifiedTimestamp,Version,USERS.UID,Background,CanOthersSetWhoShouldAsk,CanOthersSetWhoShouldAnswer,AnswerAccepted,FollowUpTo,censored,TotalVotes,NetVotes from QUESTIONS inner join USERS ON CreatedById=USERS.id where QuestionID=?",(question_id.0,)).map_err(internal_error)? {
             if censored { return Err(QuestionError::Censored); }
             match opt_hash_from_value(version) {
                 None => Ok(None),
@@ -799,7 +804,7 @@ impl QuestionInfo {
     /// Get all questions from a particular user.
     pub async fn get_questions_created_by_user(uid:&str) -> mysql::Result<Vec<QuestionID>> {
         let mut conn = get_rta_database_connection().await?;
-        let elements : Vec<QuestionID> = conn.exec_map("SELECT QuestionID from QUESTIONS where CreatedBy=? ORDER BY LastModifiedTimestamp DESC",(uid,),|(v,)|hash_from_value(v))?;
+        let elements : Vec<QuestionID> = conn.exec_map("SELECT QuestionID from QUESTIONS inner join USERS ON QUESTIONS.CreatedById=USERS.id where USERS.UID=? ORDER BY LastModifiedTimestamp DESC",(uid,),|(v,)|hash_from_value(v))?;
         Ok(elements)
     }
 
@@ -902,7 +907,8 @@ impl PlainTextVoteOnQuestionCommand {
         println!("Vote {} for {} from {}",if command.parsed.up {"Up"} else {"Down"},command.parsed.question_id,command.signed_message.user);
         let mut conn = get_rta_database_connection().await.map_err(internal_error)?;
         let mut transaction = conn.start_transaction(TxOpts::default()).map_err(internal_error)?;
-        let times_voted = transaction.exec_first::<u32, _, _>("select count(*) from HAS_VOTED where QuestionId=? and Voter=?", (command.parsed.question_id.0, &command.signed_message.user)).map_err(internal_error)?.ok_or(QuestionError::InternalError)?;
+        let user_id = get_user_id(&command.signed_message.user,QuestionError::NoSuchUser,QuestionError::InternalError,&mut transaction)?;
+        let times_voted = transaction.exec_first::<u32, _, _>("select count(*) from HAS_VOTED where QuestionId=? and VoterId=?", (command.parsed.question_id.0, user_id)).map_err(internal_error)?.ok_or(QuestionError::InternalError)?;
         if times_voted > 0 { return Err(QuestionError::AlreadyVoted) }
         let (version,) = transaction.exec_first("SELECT Version from QUESTIONS where QuestionID=?", (command.parsed.question_id.0, )).map_err(internal_error)?.ok_or(QuestionError::QuestionDoesNotExist)?;
         let version = opt_hash_from_value(version).ok_or(QuestionError::InternalError)?;
@@ -910,7 +916,7 @@ impl PlainTextVoteOnQuestionCommand {
         let for_bb = PlainTextVoteOnQuestionCommandPostedToBulletinBoard { command: command.clone(), timestamp, prior: version };
         let version = LogInBulletinBoard::PlainTextVoteQuestion(for_bb).log_in_bulletin_board().await.map_err(bulletin_board_error)?;
         transaction.exec_drop("update QUESTIONS set Version=?,LastModifiedTimestamp=?,TotalVotes=TotalVotes+1,NetVotes=NetVotes+? where QuestionID=?", (version.0, timestamp, if command.parsed.up { 1 } else { -1 }, command.parsed.question_id.0)).map_err(internal_error)?;
-        transaction.exec_drop("insert into HAS_VOTED (QuestionID,Voter) values (?,?)", (command.parsed.question_id.0, &command.signed_message.user)).map_err(internal_error)?;
+        transaction.exec_drop("insert into HAS_VOTED (QuestionID,VoterId) values (?,?)", (command.parsed.question_id.0, user_id)).map_err(internal_error)?;
         transaction.commit().map_err(internal_error)?;
         Ok(version)
     }
