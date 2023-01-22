@@ -29,7 +29,6 @@ create table if not exists UserElectorate
 (
     user_id INTEGER NOT NULL,
     electorate_id INTEGER NOT NULL,
-    INDEX(user_id),
     CONSTRAINT FOREIGN KEY (user_id) REFERENCES USERS (id) ON DELETE CASCADE ON UPDATE RESTRICT,
     CONSTRAINT FOREIGN KEY (electorate_id) REFERENCES ElectorateDefinition (id) ON DELETE CASCADE ON UPDATE RESTRICT
 ) CHARACTER SET utf8;

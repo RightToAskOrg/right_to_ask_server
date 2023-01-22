@@ -14,7 +14,7 @@ drop table if exists Answer;
 create table if not exists USERS
 (
     id          INTEGER PRIMARY KEY AUTO_INCREMENT NOT NULL, /* The real permanent unique id for a person. UID rarely changes but sometimes does. */
-    UID         VARCHAR(30) PRIMARY KEY NOT NULL,
+    UID         VARCHAR(30) NOT NULL,
     DisplayName VARCHAR(60),
     AusState    VARCHAR(3),
     PublicKey   TEXT NOT NULL,
@@ -236,5 +236,5 @@ create table SchemaVersion
     version INT
 );
 
-insert into SchemaVersion (version) values (5);
+insert into SchemaVersion (version) values (7);
 
