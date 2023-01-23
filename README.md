@@ -34,6 +34,8 @@ sudo mysql_secure_installation
 Setting up a root password is problematic see
 https://www.digitalocean.com/community/tutorials/how-to-install-mariadb-on-ubuntu-20-04
 
+So say 'no' to setting a root password. Then say yes to everything else: remove anonymous users, disallow remote root login, remove test databases, reload privilege tables.
+
 Then set up databases, and limited access users via
 
 ```bash
