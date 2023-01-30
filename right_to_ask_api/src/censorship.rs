@@ -26,6 +26,7 @@ pub enum CensorshipReason {
     DefamatoryInsinuation,
     Illegal,
     Impersonation,
+    Spam,
 }
 
 #[derive(Serialize,Deserialize,Debug,Clone)]
