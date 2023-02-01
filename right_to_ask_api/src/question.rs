@@ -175,7 +175,7 @@ pub enum PersonID {
 impl PersonID {
     /// Get the people who should ask (role='Q') or answer (role='A') a question.
     fn get_for_question(conn:&mut impl Queryable,role:char,question:QuestionID) -> mysql::Result<Vec<PersonID>> {
-        let elements : Vec<(Option<UserUID>,Option<MPIndexInDatabaseTable>,Option<OrgIndexInDatabaseTable>,Option<CommitteeIndexInDatabaseTable>,Option<MinisterIndexInDatabaseTable>)> = conn.exec_map("SELECT USERS.UID,MP,ORG,Committee,Minister from PersonForQuestion inner join USERS ON PersonForQuestion.UserId=USERS.id where QuestionId=? and ROLE=?",(&question.0,role.to_string()),|(uid,mp,org,committee,minister)|(uid,mp,org,committee,minister))?;
+        let elements : Vec<(Option<UserUID>,Option<MPIndexInDatabaseTable>,Option<OrgIndexInDatabaseTable>,Option<CommitteeIndexInDatabaseTable>,Option<MinisterIndexInDatabaseTable>)> = conn.exec_map("SELECT USERS.UID,MP,ORG,Committee,Minister from PersonForQuestion left join USERS ON PersonForQuestion.UserId=USERS.id where QuestionId=? and ROLE=?",(&question.0,role.to_string()),|(uid,mp,org,committee,minister)|(uid,mp,org,committee,minister))?;
         let mut res = vec![];
         for (uid,mp,org,committee,minister) in elements {
             let decoded = {
