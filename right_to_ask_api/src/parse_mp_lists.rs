@@ -409,7 +409,7 @@ fn parse_nt_la_pdf(path:&Path) -> anyhow::Result<Vec<MP>> {
                         role: roles.join("; "),
                         party: party.take().ok_or_else(||anyhow!("No NT party found"))?,
                     };
-                    println!("{}",mp);
+                    // println!("{}",mp);
                     mps.push(mp);
                     history.clear();
                     roles.clear();
@@ -621,7 +621,12 @@ pub fn create_mp_list() -> anyhow::Result<()> {
         }
         mps.extend(senate_from_csvs);
         for mp in &mut reps_from_csvs {
-            mp.email = reps_emails.get(mp.electorate.region.as_ref().ok_or_else(||anyhow!("No electorate for house of reps"))?).ok_or_else(||anyhow!("No email from pdf for house of reps {} {} member for {}",mp.first_name,mp.surname,mp.electorate.region.as_ref().unwrap()))?.to_string();
+            if let Some(found_email) = reps_emails.get(mp.electorate.region.as_ref().ok_or_else(||anyhow!("No electorate for house of reps"))?) {
+                mp.email=found_email.to_string();
+            } else {
+                eprintln!("No email from pdf for house of reps {} {} member for {}",mp.first_name,mp.surname,mp.electorate.region.as_ref().unwrap());
+            }
+            // mp.email = reps_emails.get(mp.electorate.region.as_ref().ok_or_else(||anyhow!("No electorate for house of reps"))?).ok_or_else(||anyhow!("No email from pdf for house of reps {} {} member for {}",mp.first_name,mp.surname,mp.electorate.region.as_ref().unwrap()))?.to_string();
         }
         mps.extend(reps_from_csvs);
         federal_electorates_by_state
