@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Moderation</title>
+    <link rel="stylesheet" href="../common.css">
+    <link rel="stylesheet" href="moderation.css">
+    <script src="../util.js"></script>
+    <script src="../common.js"></script>
+    <script src="../signing.js"></script>
+    <script src="../PrettyShowQuestion.js"></script>
+    <script src="moderation.js"></script>
+</head>
+
+<body>
+
+<h4>Moderate question</h4>
+
+<label for="QuestionID">Question : </label><input id="QuestionID" type="text"/><br/>
+<div id="QuestionDetails"></div>
+<div id="CensorActions">
+    <label for="CensorReason">Censor Reason</label><select id="CensorReason">
+        <option value="NotAQuestion">Not A Question</option>
+        <option value="ThreateningViolence">Threatening Violence</option>
+        <option value="IncludesPrivateInformation">Includes Private Information</option>
+        <option value="IncitesHatredOrDiscrimination">Incites Hatred Or Discrimination</option>
+        <option value="EncouragesHarm">Encourages Harm</option>
+        <option value="TargetedHarassment">Targeted Harassment</option>
+        <option value="DefamatoryInsinuation">Defamatory Insinuation</option>
+        <option value="Illegal">Illegal</option>
+        <option value="Impersonation">Impersonation</option>
+        <option value="Spam">Spam</option>
+    </select>
+    <button id="CensorQuestion" disabled="disabled">Censor whole question</button>
+    <button id="CensorJustAnswers" disabled="disabled">Censor just selected answers, allow question</button>
+    <button id="Allow" disabled="disabled">Allow all</button>
+</div>
+
+
+
+<h4>Questions to moderate</h4>
+<p>There are <span id="NumQuestions">???</span> Questions reported since last moderated. <button id="Refresh">Refresh</button></p>
+
+<div id="QuestionList">
+
+</div>
+
+<div id="status">
+    <h5>Status</h5>
+</div>
+</body>
+</html>

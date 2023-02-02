@@ -3,7 +3,7 @@
 function vote(up) {
     function success(result) {
         console.log(result);
-        if (result.Ok) {
+        if (result.hasOwnProperty("Ok")) {
             check_signature(result.Ok);
             status("Voted successfully. Bulletin Board hash "+result.Ok.message+" signature "+result.Ok.signature);
             updateQuestion();
@@ -19,6 +19,23 @@ function vote(up) {
     getWebJSON("plaintext_vote_question",success,failure,JSON.stringify(signed_message),"application/json")
 }
 
+function reportQuestion() {
+    function success(result) {
+        console.log(result);
+        if (result.hasOwnProperty("Ok")) {
+            status("Reported question successfully.");
+            updateQuestion();
+        } else {
+            status("Tried to report question. Got Error message "+result.Err);
+        }
+    }
+    let command = {
+        question_id : question_id,
+        reason : document.getElementById("ReportReason").value,
+    };
+    let signed_message = sign_message(command);
+    getWebJSON("report_question",success,failure,JSON.stringify(signed_message),"application/json")
+}
 function editQuestion() {
     function success(result) {
         console.log(result);
@@ -110,6 +127,7 @@ function setQuestion(questionInfo) {
         document.getElementById("LastModified").innerText=question.last_modified;
         document.getElementById("TotalVotes").innerText=""+question.total_votes;
         document.getElementById("NetVotes").innerText=""+question.net_votes;
+        document.getElementById("CensorshipStatus").innerText=""+question.censorship_status;
         document.getElementById("QuestionText").innerText=question.question_text;
         document.getElementById("Author").innerText=question.author;
         document.getElementById("Version").innerText=question.version;
@@ -165,6 +183,7 @@ let actualAnswerer = null;
 window.onload = function () {
     question_id = new URLSearchParams(window.location.search).get("question_id");
     document.getElementById("Edit").onclick = editQuestion;
+    document.getElementById("Report").onclick = reportQuestion;
     document.getElementById("Upvote").onclick = function() { vote(true); };
     document.getElementById("Downvote").onclick = function() { vote(false); };
     updateQuestion();

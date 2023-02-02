@@ -7,7 +7,7 @@ use right_to_ask_api::person::{NewRegistration, get_list_of_all_users, get_count
 use merkle_tree_bulletin_board::hash::HashValue;
 use right_to_ask_api::database::{check_rta_database_version_current, find_similar_text_question, get_bulletin_board};
 use merkle_tree_bulletin_board::hash_history::{FullProof, HashInfo};
-use right_to_ask_api::censorship::{CensorQuestionCommand, QuestionHistory, ReportQuestionCommand};
+use right_to_ask_api::censorship::{CensorQuestionCommand, QuestionHistory, ReportedQuestionReasonSummary, ReportedQuestionSummary, ReportQuestionCommand};
 use right_to_ask_api::signing::{get_server_public_key_base64encoded, ServerSigned, get_server_public_key_raw_hex, get_server_public_key_raw_base64, ClientSigned};
 use right_to_ask_api::common_file::{COMMITTEES, HEARINGS, MPS};
 use right_to_ask_api::question::{EditQuestionCommand, NewQuestionCommand, PlainTextVoteOnQuestionCommand, QuestionID, QuestionInfo, QuestionNonDefiningFields, SimilarQuestionQuery, SimilarQuestionResult};
@@ -191,19 +191,30 @@ async fn get_questions_created_by_user(query:web::Query<QueryUser>) -> Json<Resu
 }
 
 
-// TODO put admin authentication on this
-#[post("/censor_question")]
+#[post("/moderation/censor_question")]
 async fn censor_question(command : Json<CensorQuestionCommand>) -> Json<Result<HashValue,String>> {
     Json(command.censor_question().await.map_err(|e|e.to_string()))
 }
 
+#[get("/moderation/get_reported_questions")]
+async fn get_reported_questions() -> Json<Result<Vec<ReportedQuestionSummary>,String>> {
+    Json(ReportedQuestionSummary::get_reported_questions().await.map_err(|e|e.to_string()))
+}
+
+#[get("/moderation/get_reasons_reported")]
+async fn get_reasons_reported(query:web::Query<QueryQuestion>) -> Json<Result<ReportedQuestionReasonSummary,String>> {
+    Json(ReportedQuestionReasonSummary::get_reasons_reported(query.question_id).await.map_err(|e|e.to_string()))
+}
+
+
+
 #[post("/report_question")]
-async fn report_question(command : Json<ClientSigned<ReportQuestionCommand>>) -> Json<Result<ServerSigned,String>> {
+async fn report_question(command : Json<ClientSigned<ReportQuestionCommand>>) -> Json<Result<(),String>> { // ServerSigned not () in result if want to put on bulletin board
     if let Err(signing_error) = command.signed_message.check_signature().await {
         Json(Err(signing_error.to_string()))
     } else {
         let res = ReportQuestionCommand::report_question(&command).await;
-        let signed = res.map_err(|e|e.to_string()).map(|h|ServerSigned::new_string(h.to_string()));
+        let signed = res.map_err(|e|e.to_string()); //.map(|h|ServerSigned::new_string(h.to_string()));
         Json(signed)
     }
 }
@@ -215,8 +226,7 @@ struct Censor {
     leaf_to_censor : HashValue,
 }
 
-// TODO put admin authentication on this. Or just delete it.
-#[post("/censor_leaf")]
+#[post("/moderation/censor_leaf")]
 async fn censor_leaf(command : Json<Censor>) -> Json<Result<(),String>> {
     Json(get_bulletin_board().await.censor_leaf(command.leaf_to_censor).map_err(|e|e.to_string()))
 }
@@ -232,8 +242,7 @@ async fn get_most_recent_published_root() -> Json<Result<Option<HashValue>,Strin
     Json(get_bulletin_board().await.get_most_recent_published_root().map_err(|e|e.to_string()))
 }
 
-// TODO put admin authentication on this.
-#[post("/order_new_published_root")]
+#[post("/admin/order_new_published_root")]
 async fn order_new_published_root() -> Json<Result<HashValue,String>> {
     Json(get_bulletin_board().await.order_new_published_root().map_err(|e|e.to_string()))
 }
@@ -314,7 +323,7 @@ async fn info() -> Result<Json<Info>,Box<dyn std::error::Error + 'static>> {
     }))
 }
 
-#[post("/reload_info")]
+#[post("/admin/reload_info")]
 /// Force the server to reload the MPs.json file, the committees.json file, and the hearings.json file (without restarting).
 async fn reload_info() -> &'static str {
     MPS.reset();
@@ -323,20 +332,20 @@ async fn reload_info() -> &'static str {
     "OK"
 }
 
-#[post("/put_on_do_not_email_list")]
+#[post("/admin/put_on_do_not_email_list")]
 async fn put_on_do_not_email_list(command : Json<EmailAddress>) -> Json<Result<(),String>> {
     Json(command.change_do_not_email_list(true).await.map_err(|e|e.to_string()))
 }
-#[post("/take_off_do_not_email_list")]
+#[post("/admin/take_off_do_not_email_list")]
 async fn take_off_do_not_email_list(command : Json<EmailAddress>) -> Json<Result<(),String>> {
     Json(command.change_do_not_email_list(false).await.map_err(|e|e.to_string()))
 }
 
-#[get("/get_do_not_email_list")]
+#[get("/admin/get_do_not_email_list")]
 async fn get_do_not_email_list() -> Json<Result<Vec<EmailAddress>,String>> {
     Json(EmailAddress::get_do_not_email_list().await.map_err(|e|e.to_string()))
 }
-#[post("/reset_times_sent")]
+#[post("/admin/reset_times_sent")]
 async fn reset_times_sent(command : Json<u32>) -> Json<Result<(),String>> {
     Json(EmailAddress::reset_times_sent(command.0).await.map_err(|e|e.to_string()))
 }
@@ -344,11 +353,11 @@ async fn reset_times_sent(command : Json<u32>) -> Json<Result<(),String>> {
 struct QueryTimescale {
     timescale : u32,
 }
-#[get("/get_times_sent")]
+#[get("/admin/get_times_sent")]
 async fn get_times_sent(query:web::Query<QueryTimescale>) -> Json<Result<Vec<TimesSent>,String>> {
     Json(EmailAddress::get_times_sent(query.timescale).await.map_err(|e|e.to_string()))
 }
-#[post("/take_off_times_sent_list")]
+#[post("/admin/take_off_times_sent_list")]
 async fn take_off_times_sent_list(command : Json<EmailAddress>) -> Json<Result<(),String>> {
     Json(command.take_off_times_sent_list().await.map_err(|e|e.to_string()))
 }
@@ -385,6 +394,8 @@ async fn main() -> anyhow::Result<()> {
             .service(get_question)
             .service(get_question_history)
             .service(censor_question)
+            .service(get_reported_questions)
+            .service(get_reasons_reported)
             .service(report_question)
             .service(censor_leaf)
             .service(get_parentless_unpublished_hash_values)

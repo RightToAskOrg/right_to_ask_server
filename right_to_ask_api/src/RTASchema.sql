@@ -75,10 +75,12 @@ create table if not exists QUESTIONS
     CanOthersSetWhoShouldAnswer BOOLEAN NOT NULL,
     AnswerAccepted  BOOLEAN NOT NULL,
     FollowUpTo  BINARY(32) NULL,
-    censored BOOLEAN NOT NULL DEFAULT FALSE,
     TotalVotes  INT NOT NULL DEFAULT 0,
     NetVotes    INT NOT NULL DEFAULT 0,
+    CensorshipStatus  ENUM('NotFlagged','Flagged','Allowed','StructureChanged','StructureChangedThenFlagged','Censored') NOT NULL DEFAULT 'NotFlagged',
+    NumFlags INTEGER NOT NULL DEFAULT 0, /* number of flags of the question (or an answer in it) [since the last moderator approval] */
     INDEX(LastModifiedTimestamp),
+    INDEX(NumFlags),
     foreign key (CreatedById) REFERENCES USERS (id) ON DELETE CASCADE ON UPDATE RESTRICT
 ) CHARACTER SET utf8;
 
@@ -193,7 +195,7 @@ create table if not exists Answer
     timestamp   BIGINT UNSIGNED NOT NULL,
     answer      TEXT NOT NULL,
     version     BINARY(32), /* when the answer was created. Used as a key for censoring */
-    censored    BOOLEAN NOT NULL DEFAULT FALSE,
+    CensorshipStatus  ENUM('NotFlagged','Flagged','Allowed','StructureChanged','StructureChangedThenFlagged','Censored') NOT NULL DEFAULT 'NotFlagged',
     INDEX(version),
     foreign key (QuestionId) REFERENCES QUESTIONS (QuestionId) ON DELETE CASCADE ON UPDATE RESTRICT,
     INDEX(MP),
@@ -229,6 +231,26 @@ create table EmailRateLimitHistory(
                                       INDEX(timescale)
 ) CHARACTER SET utf8;
 
+CREATE TABLE QuestionReportedReasons (
+                                         QuestionId BINARY (32) NOT NULL, /* The hash of the question defining fields */
+                                         reason ENUM('NotAQuestion','ThreateningViolence','IncludesPrivateInformation','IncitesHatredOrDiscrimination','EncouragesHarm','TargetedHarassment','DefamatoryInsinuation','Illegal','Impersonation','Spam') NOT NULL,
+                                         user_id INTEGER NOT NULL,
+                                         CONSTRAINT FOREIGN KEY (user_id) REFERENCES USERS (id) ON DELETE CASCADE ON UPDATE RESTRICT,
+                                         constraint foreign key (QuestionId) REFERENCES QUESTIONS (QuestionId) ON DELETE CASCADE ON UPDATE RESTRICT,
+                                         constraint qru unique (QuestionId,reason,user_id)
+)  CHARACTER SET utf8;
+
+CREATE TABLE AnswerReportedReasons (
+                                       QuestionId BINARY (32) NOT NULL, /* The hash of the question defining fields */
+                                       reason ENUM('NotAQuestion','ThreateningViolence','IncludesPrivateInformation','IncitesHatredOrDiscrimination','EncouragesHarm','TargetedHarassment','DefamatoryInsinuation','Illegal','Impersonation','Spam') NOT NULL,
+                                       answer BINARY (32) NOT NULL,
+                                       user_id INTEGER NOT NULL,
+                                       CONSTRAINT FOREIGN KEY (user_id) REFERENCES USERS (id) ON DELETE CASCADE ON UPDATE RESTRICT,
+                                       constraint foreign key (QuestionId) REFERENCES QUESTIONS (QuestionId) ON DELETE CASCADE ON UPDATE RESTRICT,
+                                       constraint foreign key (answer) REFERENCES Answer (version) ON DELETE CASCADE ON UPDATE RESTRICT,
+                                       constraint qrau unique (QuestionId,reason,answer,user_id)
+)  CHARACTER SET utf8;
+
 
 
 create table SchemaVersion
@@ -236,5 +258,5 @@ create table SchemaVersion
     version INT
 );
 
-insert into SchemaVersion (version) values (7);
+insert into SchemaVersion (version) values (8);
 

@@ -21,6 +21,7 @@ use reqwest::Url;
 use sha2::{Digest, Sha256};
 use url::Host;
 use word_comparison::comparison_list::ScoredIDs;
+use crate::censorship::CensorshipStatus;
 use crate::committee::{CommitteeId, CommitteeIndexInDatabaseTable};
 use crate::common_file::COMMITTEES;
 use crate::config::CONFIG;
@@ -87,6 +88,8 @@ pub enum QuestionError {
     AlreadyVoted,
     /// The question author doesn't exist. Mainly happens if submitting a new question at the same time as changing UID.
     NoSuchUser,
+    /// The user is reporting a question (or answer) for something already reported by that same user.
+    AlreadyReported,
 }
 
 impl Display for QuestionError {
@@ -276,6 +279,7 @@ impl PersonID {
 
 
 fn is_false(x:&bool) -> bool { !*x }
+fn is_not_flagged(x:&CensorshipStatus) -> bool { *x == CensorshipStatus::NotFlagged }
 
 #[derive(Serialize,Deserialize,Debug,Clone)]
 /// This contains the fields for the question that can be changed.
@@ -298,7 +302,7 @@ pub struct QuestionNonDefiningFields {
     pub background : Option<String>,
     /// Validity: must be an MP or a user. (If a user is associated with an MP then tag for the MP.)
     /// Permission: defined by who_should_ask_the_question_permissions
-    /// Merge rule: TODO consider whether the version check changes this. Eliminate duplicates (including with values already present). If the total number of values doesn't exceed the limit, accept. If the limit has already been exceeded, reject. If it hasn't, but would if this update was accepted, send a merge request back to the client (pick at most m out of the n you tried to submit...).  Note that this might cause cascading merges that need to be manually resolved, but that's less trouble than allowing locks.
+    /// Merge rule: Eliminate duplicates (including with values already present). If the total number of values doesn't exceed the limit, accept. If the limit has already been exceeded, reject. If it hasn't, but would if this update was accepted, send a merge request back to the client (pick at most m out of the n you tried to submit...).  Note that this might cause cascading merges that need to be manually resolved, but that's less trouble than allowing locks.
     #[serde(skip_serializing_if = "Vec::is_empty",default)]
     pub mp_who_should_ask_the_question : Vec<PersonID>,
     /// Permission: must be from the question-writer
@@ -326,7 +330,7 @@ pub struct QuestionNonDefiningFields {
     /// Merge rule : may be changed from false to true.
     #[serde(skip_serializing_if = "is_false",default)]
     pub answer_accepted : bool,
-    /// Validity : domain must be aph.gov.au, parliament.vic.gov.au, etc. (preloaded permit-list - note that url sanitation is nontrivial). TODO work out nontrivial stuff
+    /// Validity : domain must be aph.gov.au, parliament.vic.gov.au, etc. (preloaded permit-list - note that url sanitation is nontrivial).
     /// Permission: anyone can add
     /// Merge rule : same as mp_who_should_ask_the_question
     #[serde(skip_serializing_if = "Vec::is_empty",default)]
@@ -338,6 +342,8 @@ pub struct QuestionNonDefiningFields {
     pub is_followup_to : Option<QuestionID>,
 }
 
+pub type AnswerId = usize;
+
 #[derive(Serialize,Deserialize,Debug,Clone)]
 pub struct QuestionAnswer {
     /// must be a MP. Set by server to whoever signed the message - client should not set this when sending to server.
@@ -348,10 +354,10 @@ pub struct QuestionAnswer {
     /// set by server - client should not set this when sending to server.
     #[serde(skip_serializing_if = "Option::is_none",default)]
     pub timestamp : Option<Timestamp>,
-    /// Whether this answer has been censored.
+    /// Whether this answer has been censored/flagged/etc.
     /// set by server - client should not set this when sending to server.
-    #[serde(skip_serializing_if = "is_false",default)]
-    pub censored : bool,
+    #[serde(skip_serializing_if = "is_not_flagged",default)]
+    pub censorship_status : CensorshipStatus,
     /// The bulletin board identifier associated with this answer. Used for flagging/censorship.
     /// set by server - client should not set this when sending to server.
     #[serde(skip_serializing_if = "Option::is_none",default)]
@@ -361,11 +367,11 @@ pub struct QuestionAnswer {
 impl QuestionAnswer {
     /// Get the answers to a question.
     fn get_for_question(conn:&mut impl Queryable,question:QuestionID) -> mysql::Result<Vec<QuestionAnswer>> {
-        let entries : Vec<(UserUID,MPIndexInDatabaseTable,Timestamp,String,bool,mysql::Value)> = conn.exec("SELECT USERS.UID,mp,timestamp,answer,censored,version from Answer inner join USERS ON Answer.AuthorId=USERS.id where QuestionId=? order by timestamp",(&question.0,))?;
+        let entries : Vec<(UserUID,MPIndexInDatabaseTable,Timestamp,String,CensorshipStatus,mysql::Value)> = conn.exec("SELECT USERS.UID,mp,timestamp,answer,CensorshipStatus,version from Answer inner join USERS ON Answer.AuthorId=USERS.id where QuestionId=? order by timestamp",(&question.0,))?;
         let mut res : Vec<QuestionAnswer> = vec![];
-        for (answered_by,mp,timestamp,answer,censored,version) in entries {
+        for (answered_by,mp,timestamp,answer,censorship_status,version) in entries {
             if let Some(mp_id) = MPId::read_from_database(conn,mp)? {
-                res.push(QuestionAnswer{answered_by:Some(answered_by),mp:mp_id,answer,timestamp: Some(timestamp),censored,version:opt_hash_from_value(version) })
+                res.push(QuestionAnswer{answered_by:Some(answered_by),mp:mp_id,answer,timestamp: Some(timestamp),censorship_status,version:opt_hash_from_value(version) })
             } else {
                 eprintln!("Missing mp {} in question {} answer",mp,question);
             }
@@ -382,7 +388,7 @@ impl QuestionAnswer {
 
     fn check_legal(&self,conn:&mut impl Queryable,uid:&UserUID) -> Result<(),QuestionError> {
         if self.answer.len()>MAX_ANSWER_LENGTH { return Err(QuestionError::AnswerTooLong); }
-        if self.answered_by.is_some() || self.timestamp.is_some() || self.censored || self.version.is_some() { return Err(QuestionError::AnswerContainsUndesiredFields); }
+        if self.answered_by.is_some() || self.timestamp.is_some() || self.censorship_status!=CensorshipStatus::NotFlagged || self.version.is_some() { return Err(QuestionError::AnswerContainsUndesiredFields); }
         let mps = MPSpec::get().map_err(internal_error)?;
         if let Some(mp) = mps.find(&self.mp) {
             let badges : usize = conn.exec_first("SELECT COUNT(badge) from BADGES inner join USERS ON BADGES.user_id=USERS.id where USERS.UID=? and BADGES.what=? and (BADGES.badge='MP' || BADGES.badge='MPStaff')",(uid,mp.badge_name())).map_err(internal_error)?.ok_or_else(||QuestionError::InternalError)?;
@@ -434,14 +440,14 @@ impl HansardLink {
 /// Any modification to the question database will have to
 ///  * Check that the database version is the expected version.
 ///  * modify the version and last updated timestamp.
-///
+///  * Change the censorship status if in state 'Allowed' to state 'StructureChanged'
 /// This does these common tasks.
 pub(crate) async fn modify_question_database_version_and_time(transaction:&mut Transaction<'_>,question_id:QuestionID,new_version:LastQuestionUpdate,expecting_version:Option<LastQuestionUpdate>,timestamp:Timestamp) -> Result<(),QuestionError>{
     if let Some(current_version) = transaction.exec_first::<mysql::Value,_,_>("select Version from QUESTIONS where QuestionID=?",(question_id.0,)).map_err(internal_error)? {
         let expected : mysql::Value = expecting_version.map(|v|v.0).into();
         if expected!=current_version { return Err(QuestionError::LastUpdateIsNotCurrent); }
     } else { return Err(QuestionError::QuestionDoesNotExist); }
-    transaction.exec_drop("update QUESTIONS set LastModifiedTimestamp=?,Version=? where QuestionID=?", (timestamp,new_version.0,question_id.0)).map_err(internal_error)?;
+    transaction.exec_drop("update QUESTIONS set LastModifiedTimestamp=?,Version=?,CensorshipStatus = IF(CensorshipStatus='Allowed','StructureChanged',CensorshipStatus) where QuestionID=?", (timestamp,new_version.0,question_id.0)).map_err(internal_error)?;
     Ok(())
 }
 
@@ -507,11 +513,9 @@ impl QuestionNonDefiningFields {
 
 
     /// Add a simple question to the database, without any extra information yet.
-    async fn modify_database(&self,question_id:QuestionID,new_version:LastQuestionUpdate,expecting_version:Option<LastQuestionUpdate>,timestamp:Timestamp,uid:&UserUID) -> Result<(),QuestionError> {
+    async fn modify_database(&self,transaction:&mut Transaction<'_>,question_id:QuestionID,new_version:LastQuestionUpdate,expecting_version:Option<LastQuestionUpdate>,timestamp:Timestamp,uid:&UserUID) -> Result<(),QuestionError> {
         println!("modify_database with question non-defining fields {:?}",self);
-        let mut conn = get_rta_database_connection().await.map_err(internal_error)?;
-        let mut transaction = conn.start_transaction(TxOpts::default()).map_err(internal_error)?;
-        modify_question_database_version_and_time(&mut transaction,question_id,new_version,expecting_version,timestamp).await?;
+        modify_question_database_version_and_time(transaction,question_id,new_version,expecting_version,timestamp).await?;
         if let Some(background) = &self.background {
             // println!("Setting background to {}",background);
             transaction.exec_drop("update QUESTIONS set Background=? where QuestionID=?", (background,question_id.0)).map_err(internal_error)?;
@@ -523,22 +527,22 @@ impl QuestionNonDefiningFields {
             transaction.exec_drop("update QUESTIONS set CanOthersSetWhoShouldAnswer=? where QuestionID=?", (self.who_should_answer_the_question_permissions==Permissions::Others,question_id.0)).map_err(internal_error)?;
         }
         if !self.mp_who_should_ask_the_question.is_empty() {
-            let existing = PersonID::get_for_question(&mut transaction,'Q',question_id).map_err(internal_error)?.into_iter().collect::<HashSet<_>>();
+            let existing = PersonID::get_for_question(transaction,'Q',question_id).map_err(internal_error)?.into_iter().collect::<HashSet<_>>();
             let extra : HashSet<_> = self.mp_who_should_ask_the_question.iter().filter(|&m|!existing.contains(m)).collect();
             if existing.len()+extra.len() > MAX_MPS_WHO_SHOULD_ASK_THE_QUESTION { return Err(QuestionError::TooLongListOfPeopleAskingQuestion);}
-            PersonID::add_for_question(&mut transaction,'Q',question_id,extra)?;
+            PersonID::add_for_question(transaction,'Q',question_id,extra)?;
         }
         if !self.entity_who_should_answer_the_question.is_empty() {
-            let existing = PersonID::get_for_question(&mut transaction,'A',question_id).map_err(internal_error)?.into_iter().collect::<HashSet<_>>();
+            let existing = PersonID::get_for_question(transaction,'A',question_id).map_err(internal_error)?.into_iter().collect::<HashSet<_>>();
             let extra : HashSet<_> = self.entity_who_should_answer_the_question.iter().filter(|&m|!existing.contains(m)).collect();
             if existing.len()+extra.len() > MAX_MPS_WHO_SHOULD_ASK_THE_QUESTION { return Err(QuestionError::TooLongListOfPeopleAskingQuestion);}
-            PersonID::add_for_question(&mut transaction,'A',question_id,extra)?;
+            PersonID::add_for_question(transaction,'A',question_id,extra)?;
         }
         if let Some(follow_up_to) = self.is_followup_to {
             transaction.exec_drop("update QUESTIONS set FollowUpTo=? where QuestionID=?", (follow_up_to.0,question_id.0)).map_err(internal_error)?;
         }
         for a in &self.answers {
-            a.add_for_question(&mut transaction,question_id,timestamp,uid,new_version)?;
+            a.add_for_question(transaction,question_id,timestamp,uid,new_version)?;
         }
         if self.answer_accepted {
             // There could be optimization here checking if it was already set.
@@ -546,13 +550,12 @@ impl QuestionNonDefiningFields {
         }
         if !self.hansard_link.is_empty() {
             // remove duplicates
-            let existing = HansardLink::get_for_question(&mut transaction,question_id).map_err(internal_error)?.into_iter().collect::<HashSet<_>>();
+            let existing = HansardLink::get_for_question(transaction,question_id).map_err(internal_error)?.into_iter().collect::<HashSet<_>>();
             let extra : Vec<_> = self.hansard_link.iter().filter(|&m|!existing.contains(m)).collect();
             if !extra.is_empty() {
-                HansardLink::add_for_question(&mut transaction,question_id,&extra).map_err(internal_error)?;
+                HansardLink::add_for_question(transaction,question_id,&extra).map_err(internal_error)?;
             }
         }
-        transaction.commit().map_err(internal_error)?;
         Ok(())
     }
 
@@ -671,24 +674,6 @@ pub(crate) fn bulletin_board_error(error:anyhow::Error) -> QuestionError {
 }
 
 impl NewQuestionCommand {
-    /// Add a simple question to the database, without any extra information yet.
-    async fn add_question_stub(user:&str,question:&str,timestamp:Timestamp) -> Result<QuestionID,QuestionError> {
-        let defining = QuestionDefiningFields{
-            author: user.to_string(),
-            question_text: question.to_string(),
-            timestamp
-        };
-        let question_id = defining.compute_hash();
-        let mut conn = get_rta_database_connection().await.map_err(internal_error)?;
-        let mut transaction = conn.start_transaction(TxOpts::default()).map_err(internal_error)?;
-        let user_id = get_user_id(user,QuestionError::NoSuchUser,QuestionError::InternalError,&mut transaction)?;
-        if let Some(existing_timestamp) = transaction.exec_first::<Timestamp,_,_>("select CreatedTimestamp from QUESTIONS where Question=? and CreatedById=? ORDER BY CreatedTimestamp DESC",(question,user_id)).map_err(internal_error)? {
-            if existing_timestamp+24*60*60 > timestamp { return Err(QuestionError::YouJustAskedThatQuestion)}
-        }
-        transaction.exec_drop("insert into QUESTIONS (QuestionID,Question,CreatedTimestamp,LastModifiedTimestamp,CreatedById,CanOthersSetWhoShouldAsk,CanOthersSetWhoShouldAnswer,AnswerAccepted) values (?,?,?,?,?,FALSE,FALSE,FALSE)", (question_id.0,question,timestamp,timestamp,user_id)).map_err(internal_error)?;
-        transaction.commit().map_err(internal_error)?;
-        Ok(question_id)
-    }
 
     /// API function to add a question to the server
     pub async fn add_question(question:&ClientSigned<NewQuestionCommand>) -> Result<NewQuestionCommandResponse,QuestionError> {
@@ -696,14 +681,30 @@ impl NewQuestionCommand {
         if question.parsed.question_text.len()<MIN_QUESTION_LENGTH { return Err(QuestionError::QuestionTooShort); }
         question.parsed.non_defining_fields.check_legal(true,&question.signed_message.user,None).await?;
         let timestamp = timestamp_now().map_err(internal_error)?;
-        let question_id = Self::add_question_stub(&question.signed_message.user,&question.parsed.question_text,timestamp).await?;
+        let defining = QuestionDefiningFields{
+            author: question.signed_message.user.to_string(),
+            question_text: question.parsed.question_text.to_string(),
+            timestamp
+        };
+        let question_id = defining.compute_hash();
         let for_bb = NewQuestionCommandPostedToBulletinBoard {
             command: question.clone(),
             timestamp,
             question_id
         };
+        let mut conn = get_rta_database_connection().await.map_err(internal_error)?;
+        let user_id = get_user_id(&question.signed_message.user,QuestionError::NoSuchUser,QuestionError::InternalError,&mut conn)?; // user_id doesn't change - doesn't need to be in transaction. It is conceivable that someone changes their UID, and simultaneously submits a new question, and simultaneously someone else claims the old UID, in which case the question would be assigned to the new claimer. This is not a very credible scenario.
+        if let Some(existing_timestamp) = conn.exec_first::<Timestamp,_,_>("select CreatedTimestamp from QUESTIONS where Question=? and CreatedById=? ORDER BY CreatedTimestamp DESC",(&question.parsed.question_text,user_id)).map_err(internal_error)? {
+            if existing_timestamp+24*60*60 > timestamp { return Err(QuestionError::YouJustAskedThatQuestion)}
+        } // this is first checked outside of the transaction. This will catch most of the duplicates before assigned to the bulletin board.
         let version = LogInBulletinBoard::NewQuestion(for_bb).log_in_bulletin_board().await.map_err(bulletin_board_error)?;
-        question.parsed.non_defining_fields.modify_database(question_id,version,None,timestamp,&question.signed_message.user).await?;
+        let mut transaction = conn.start_transaction(TxOpts::default()).map_err(internal_error)?;
+        if let Some(existing_timestamp) = transaction.exec_first::<Timestamp,_,_>("select CreatedTimestamp from QUESTIONS where Question=? and CreatedById=? ORDER BY CreatedTimestamp DESC",(&question.parsed.question_text,user_id)).map_err(internal_error)? {
+            if existing_timestamp+24*60*60 > timestamp { return Err(QuestionError::YouJustAskedThatQuestion)}
+        } // this is repeated inside of the transaction in case there is a delay with the bulletin board and the same question is submitted concurrently multiple times.
+        transaction.exec_drop("insert into QUESTIONS (QuestionID,Question,CreatedTimestamp,LastModifiedTimestamp,CreatedById,CanOthersSetWhoShouldAsk,CanOthersSetWhoShouldAnswer,AnswerAccepted) values (?,?,?,?,?,FALSE,FALSE,FALSE)", (question_id.0,&question.parsed.question_text,timestamp,timestamp,user_id)).map_err(internal_error)?;
+        question.parsed.non_defining_fields.modify_database(&mut transaction,question_id,version,None,timestamp,&question.signed_message.user).await?;
+        transaction.commit().map_err(internal_error)?;
         add_question_to_comparison_database(&question.parsed.question_text,question_id).await.map_err(internal_error)?;
         Ok(NewQuestionCommandResponse{ question_id, version })
     }
@@ -734,6 +735,7 @@ pub struct QuestionInfo {
     pub(crate) total_votes : u32,
     /// upvotes-downvotes.
     pub(crate) net_votes : i32,
+    pub(crate) censorship_status : CensorshipStatus,
 }
 
 /// Convert v into a HashValue where you know v will be a 32 byte value
@@ -764,9 +766,9 @@ impl QuestionInfo {
         // mysql crate only handles tuples up to 12 elements. We have 13.
         // Use less pleasant HList another way to handle wide rows is to use HList (requires `mysql_common/frunk` feature)
         use mysql_common::frunk::{HList, hlist_pat};
-        type RowType = HList!(String, Timestamp, Timestamp, mysql::Value, String, Option<String>, bool, bool, bool,  mysql::Value, bool,u32,i32);
-        if let Some(hlist_pat![question_text,timestamp,last_modified,version,author,background,who_should_ask_the_question_permissions,who_should_answer_the_question_permissions,answer_accepted,is_followup_to,censored,total_votes,net_votes]) = conn.exec_first::<RowType,_,_>("SELECT Question,CreatedTimestamp,LastModifiedTimestamp,Version,USERS.UID,Background,CanOthersSetWhoShouldAsk,CanOthersSetWhoShouldAnswer,AnswerAccepted,FollowUpTo,censored,TotalVotes,NetVotes from QUESTIONS inner join USERS ON CreatedById=USERS.id where QuestionID=?",(question_id.0,)).map_err(internal_error)? {
-            if censored { return Err(QuestionError::Censored); }
+        type RowType = HList!(String, Timestamp, Timestamp, mysql::Value, String, Option<String>, bool, bool, bool,  mysql::Value, CensorshipStatus,u32,i32);
+        if let Some(hlist_pat![question_text,timestamp,last_modified,version,author,background,who_should_ask_the_question_permissions,who_should_answer_the_question_permissions,answer_accepted,is_followup_to,censorship_status,total_votes,net_votes]) = conn.exec_first::<RowType,_,_>("SELECT Question,CreatedTimestamp,LastModifiedTimestamp,Version,USERS.UID,Background,CanOthersSetWhoShouldAsk,CanOthersSetWhoShouldAnswer,AnswerAccepted,FollowUpTo,CensorshipStatus,TotalVotes,NetVotes from QUESTIONS inner join USERS ON CreatedById=USERS.id where QuestionID=?",(question_id.0,)).map_err(internal_error)? {
+            if censorship_status==CensorshipStatus::Censored { return Err(QuestionError::Censored); }
             match opt_hash_from_value(version) {
                 None => Ok(None),
                 Some(version) => {
@@ -788,6 +790,7 @@ impl QuestionInfo {
                         last_modified,
                         total_votes,
                         net_votes,
+                        censorship_status,
                     }))
                 }
             }
@@ -877,7 +880,10 @@ impl EditQuestionCommand {
             prior : command.parsed.version,
         };
         let version = LogInBulletinBoard::EditQuestion(for_bb).log_in_bulletin_board().await.map_err(bulletin_board_error)?;
-        command.parsed.edits.modify_database(command.parsed.question_id,version,Some(command.parsed.version),timestamp,&command.signed_message.user).await?;
+        let mut conn = get_rta_database_connection().await.map_err(internal_error)?;
+        let mut transaction = conn.start_transaction(TxOpts::default()).map_err(internal_error)?;
+        command.parsed.edits.modify_database(&mut transaction,command.parsed.question_id,version,Some(command.parsed.version),timestamp,&command.signed_message.user).await?;
+        transaction.commit().map_err(internal_error)?;
         Ok(version)
     }
 }
@@ -903,6 +909,7 @@ pub struct PlainTextVoteOnQuestionCommandPostedToBulletinBoard {
 
 
 impl PlainTextVoteOnQuestionCommand {
+    /// TODO should votes change the version?
     pub async fn vote(command:&ClientSigned<PlainTextVoteOnQuestionCommand>) -> Result<LastQuestionUpdate,QuestionError> {
         println!("Vote {} for {} from {}",if command.parsed.up {"Up"} else {"Down"},command.parsed.question_id,command.signed_message.user);
         let mut conn = get_rta_database_connection().await.map_err(internal_error)?;

@@ -31,7 +31,7 @@ function pretty_show_question(div,question) {
     if (question.background) {
         const background = add(div,"QuestionBackground");
         add(background,"h5").innerText="Background";
-        background.append(background);
+        background.append(question.background);
     }
     if (question.mp_who_should_ask_the_question) {
         // TODO This is an array of PersonID objects

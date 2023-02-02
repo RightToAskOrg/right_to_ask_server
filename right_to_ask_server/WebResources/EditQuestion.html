@@ -24,6 +24,7 @@ Created : <span id="CreatedTime"></span><br/>
 Last Modified : <span id="LastModified"></span><br/>
 Total Votes : <span id="TotalVotes"></span><br/>
 Net Votes : <span id="NetVotes"></span><br/>
+Censorship Status : <span id="CensorshipStatus"></span><br/>
 <label for="BackgroundText">Background (or leave blank for none): </label><input type="text" id="BackgroundText"/><br/>
 <label for="FollowUpTo">Follow up to question ID (or leave blank for none): </label><input type="text" id="FollowUpTo"/><br/>
 <input type="checkbox" id="PermissionsAsk"> <label for="PermissionsAsk">Only author can add questioner</label><br/>
@@ -62,8 +63,21 @@ Note: This is the private key for the default public key on the AddUser page. Do
 
 <button id="Edit">Edit</button>
 <button id="Upvote">Upvote</button>
-<button id="Downvote">Downvote</button>
+<button id="Downvote">Downvote</button> <br/>
 
+<label for="ReportReason">Report Reason</label><select id="ReportReason">
+    <option value="NotAQuestion">Not A Question</option>
+    <option value="ThreateningViolence">Threatening Violence</option>
+    <option value="IncludesPrivateInformation">Includes Private Information</option>
+    <option value="IncitesHatredOrDiscrimination">Incites Hatred Or Discrimination</option>
+    <option value="EncouragesHarm">Encourages Harm</option>
+    <option value="TargetedHarassment">Targeted Harassment</option>
+    <option value="DefamatoryInsinuation">Defamatory Insinuation</option>
+    <option value="Illegal">Illegal</option>
+    <option value="Impersonation">Impersonation</option>
+    <option value="Spam">Spam</option>
+</select>
+<button id="Report">Report</button>
 
 <div id="status">
     <h5>Status</h5>

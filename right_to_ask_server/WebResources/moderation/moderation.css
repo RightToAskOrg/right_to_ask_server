@@ -1,0 +1,27 @@
+
+.ModerationQuestionDiv {
+    border: solid;
+}
+
+.QuestionID {
+    font-family: monospace;
+}
+
+.PrettyModerationQuestion {
+    padding-left: 2em;
+}
+
+.QuestionText {
+    font-style: italic;
+}
+
+.QuestionNumFlags {
+    color: red;
+    float: right;
+    padding-left: 1em;
+}
+
+.QuestionCensorshipStatus {
+    color: green;
+    float: right;
+}
