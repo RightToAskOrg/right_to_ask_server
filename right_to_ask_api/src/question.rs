@@ -1049,8 +1049,10 @@ impl SimilarQuestionQuery {
             }
         } else if just_text.is_empty() { // if no text matches, just use metadata matches.
             just_metadata.into_iter().map(|(q,n)|ScoredIDs{ id: q, score: command.weights.metadata as f64*(n as f64) }).collect()
-        } else { // if both text and metadata matches, use just the ones with matching text, but add metadata scores.
-            just_text.into_iter().map(|s|ScoredIDs{ id:s.id, score:command.weights.text as f64*s.score+command.weights.metadata as f64*(just_metadata.get(&s.id).cloned().unwrap_or(0) as f64)}).collect()
+        } else { // if both text and metadata matches, use the intersection of just_text and just_metadata, use just the ones with matching text, but add metadata scores.
+            just_text.into_iter().filter_map(|s|just_metadata.get(&s.id).map(|metadata_score|ScoredIDs{ id:s.id, score:command.weights.text as f64*s.score+command.weights.metadata as f64*(*metadata_score as f64)})).collect()
+            // code if want all text matches with metadata scores added.
+            // just_text.into_iter().map(|s|ScoredIDs{ id:s.id, score:command.weights.text as f64*s.score+command.weights.metadata as f64*(just_metadata.get(&s.id).cloned().unwrap_or(0) as f64)}).collect()
         };
         let mut conn = get_rta_database_connection().await.map_err(internal_error)?;
         let now = timestamp_now().map_err(internal_error)?;
