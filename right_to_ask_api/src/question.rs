@@ -909,23 +909,25 @@ pub struct PlainTextVoteOnQuestionCommandPostedToBulletinBoard {
 
 
 impl PlainTextVoteOnQuestionCommand {
-    /// TODO should votes change the version?
-    pub async fn vote(command:&ClientSigned<PlainTextVoteOnQuestionCommand>) -> Result<LastQuestionUpdate,QuestionError> {
+    pub async fn vote(command:&ClientSigned<PlainTextVoteOnQuestionCommand>) -> Result<(),QuestionError> { // should return LastQuestionUpdate instead of () if want to write to the BB.
         println!("Vote {} for {} from {}",if command.parsed.up {"Up"} else {"Down"},command.parsed.question_id,command.signed_message.user);
         let mut conn = get_rta_database_connection().await.map_err(internal_error)?;
         let mut transaction = conn.start_transaction(TxOpts::default()).map_err(internal_error)?;
         let user_id = get_user_id(&command.signed_message.user,QuestionError::NoSuchUser,QuestionError::InternalError,&mut transaction)?;
         let times_voted = transaction.exec_first::<u32, _, _>("select count(*) from HAS_VOTED where QuestionId=? and VoterId=?", (command.parsed.question_id.0, user_id)).map_err(internal_error)?.ok_or(QuestionError::InternalError)?;
         if times_voted > 0 { return Err(QuestionError::AlreadyVoted) }
-        let (version,) = transaction.exec_first("SELECT Version from QUESTIONS where QuestionID=?", (command.parsed.question_id.0, )).map_err(internal_error)?.ok_or(QuestionError::QuestionDoesNotExist)?;
-        let version = opt_hash_from_value(version).ok_or(QuestionError::InternalError)?;
-        let timestamp = timestamp_now().map_err(internal_error)?;
-        let for_bb = PlainTextVoteOnQuestionCommandPostedToBulletinBoard { command: command.clone(), timestamp, prior: version };
-        let version = LogInBulletinBoard::PlainTextVoteQuestion(for_bb).log_in_bulletin_board().await.map_err(bulletin_board_error)?;
-        transaction.exec_drop("update QUESTIONS set Version=?,LastModifiedTimestamp=?,TotalVotes=TotalVotes+1,NetVotes=NetVotes+? where QuestionID=?", (version.0, timestamp, if command.parsed.up { 1 } else { -1 }, command.parsed.question_id.0)).map_err(internal_error)?;
+        // code below used if we want to publish plain text votes to the bulletin board.
+        //let (version,) = transaction.exec_first("SELECT Version from QUESTIONS where QuestionID=?", (command.parsed.question_id.0, )).map_err(internal_error)?.ok_or(QuestionError::QuestionDoesNotExist)?;
+        //let version = opt_hash_from_value(version).ok_or(QuestionError::InternalError)?;
+        //let timestamp = timestamp_now().map_err(internal_error)?;
+        //let for_bb = PlainTextVoteOnQuestionCommandPostedToBulletinBoard { command: command.clone(), timestamp, prior: version };
+        //let version = LogInBulletinBoard::PlainTextVoteQuestion(for_bb).log_in_bulletin_board().await.map_err(bulletin_board_error)?;
+        //transaction.exec_drop("update QUESTIONS set Version=?,LastModifiedTimestamp=?,TotalVotes=TotalVotes+1,NetVotes=NetVotes+? where QuestionID=?", (version.0, timestamp, if command.parsed.up { 1 } else { -1 }, command.parsed.question_id.0)).map_err(internal_error)?;
+        transaction.exec_drop("update QUESTIONS set TotalVotes=TotalVotes+1,NetVotes=NetVotes+? where QuestionID=?", (if command.parsed.up { 1 } else { -1 }, command.parsed.question_id.0)).map_err(internal_error)?;
         transaction.exec_drop("insert into HAS_VOTED (QuestionID,VoterId) values (?,?)", (command.parsed.question_id.0, user_id)).map_err(internal_error)?;
         transaction.commit().map_err(internal_error)?;
-        Ok(version)
+        //Ok(version)
+        Ok(())
     }
 }
 

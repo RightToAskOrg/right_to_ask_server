@@ -80,13 +80,13 @@ async fn edit_question(command : Json<ClientSigned<EditQuestionCommand>>) -> Jso
 }
 
 #[post("/plaintext_vote_question")]
-async fn plaintext_vote_question(command : Json<ClientSigned<PlainTextVoteOnQuestionCommand>>) -> Json<Result<ServerSigned,String>> {
+async fn plaintext_vote_question(command : Json<ClientSigned<PlainTextVoteOnQuestionCommand>>) -> Json<Result<(),String>> {
     if let Err(signing_error) = command.signed_message.check_signature().await {
         Json(Err(signing_error.to_string()))
     } else {
         let res = PlainTextVoteOnQuestionCommand::vote(&command).await;
-        let signed = ServerSigned::sign_string(res);
-        Json(signed)
+        //let signed = ServerSigned::sign_string(res);
+        Json(res.map_err(|e|e.to_string()))
     }
 }
 

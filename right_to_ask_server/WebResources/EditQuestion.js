@@ -4,8 +4,10 @@ function vote(up) {
     function success(result) {
         console.log(result);
         if (result.hasOwnProperty("Ok")) {
-            check_signature(result.Ok);
-            status("Voted successfully. Bulletin Board hash "+result.Ok.message+" signature "+result.Ok.signature);
+            status("Voted successfully");
+            // code below if it were posted to BB.
+            //check_signature(result.Ok);
+            //status("Voted successfully. Bulletin Board hash "+result.Ok.message+" signature "+result.Ok.signature);
             updateQuestion();
         } else {
             status("Tried to vote. Got Error message "+result.Err);
