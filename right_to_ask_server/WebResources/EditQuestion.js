@@ -21,7 +21,7 @@ function vote(up) {
     getWebJSON("plaintext_vote_question",success,failure,JSON.stringify(signed_message),"application/json")
 }
 
-function reportQuestion() {
+function reportQuestion(answer) {
     function success(result) {
         console.log(result);
         if (result.hasOwnProperty("Ok")) {
@@ -35,6 +35,7 @@ function reportQuestion() {
         question_id : question_id,
         reason : document.getElementById("ReportReason").value,
     };
+    if (answer) command.just_answer=answer;
     let signed_message = sign_message(command);
     getWebJSON("report_question",success,failure,JSON.stringify(signed_message),"application/json")
 }
@@ -148,9 +149,15 @@ function setQuestion(questionInfo) {
         const answerDiv = document.getElementById("Answers");
         removeAllChildElements(answerDiv);
         if (question.answers) for (const answer of question.answers) {
-            const figure = add(answerDiv,"figure");
-            add(figure,"blockquote").innerText=answer.answer;
-            add(figure,"figcaption").innerText=answer.answered_by+" wearing hat as "+mp_id_tostring(answer.mp)+" time "+answer.timestamp;
+            const figure = add(answerDiv, "figure");
+            add(figure, "blockquote").innerText = answer.answer;
+            const caption = add(figure, "figcaption");
+            caption.innerText = answer.answered_by + " wearing hat as " + mp_id_tostring(answer.mp) + " time " + answer.timestamp;
+            const reportButton = add(caption,"button");
+            reportButton.innerText = "Report (reason below)";
+            reportButton.onclick = function () {
+                reportQuestion(answer.version);
+            }
         }
         const linkDiv = document.getElementById("HansardLinks");
         removeAllChildElements(linkDiv);
@@ -185,7 +192,7 @@ let actualAnswerer = null;
 window.onload = function () {
     question_id = new URLSearchParams(window.location.search).get("question_id");
     document.getElementById("Edit").onclick = editQuestion;
-    document.getElementById("Report").onclick = reportQuestion;
+    document.getElementById("Report").onclick = function () { reportQuestion(null); }
     document.getElementById("Upvote").onclick = function() { vote(true); };
     document.getElementById("Downvote").onclick = function() { vote(false); };
     updateQuestion();

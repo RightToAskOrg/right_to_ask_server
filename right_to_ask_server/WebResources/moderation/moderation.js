@@ -43,11 +43,18 @@ function pretty_show_report_reasons(reportDiv,question,report_reasons) {
     add(headline,"th").innerText="Count";
     add(headline,"th").innerText="Answer";
     const tbody = add(table,"tbody");
+    function answer_of_version(version) {
+        if (version && question.Ok && question.Ok.answers) {
+            const found = question.Ok.answers.find(a=>a.version===version);
+            if (found) return found.answer;
+        }
+        return null;
+    }
     for (const reason of report_reasons.reasons) {
         const row = add(tbody,"tr");
         add(row,"td").innerText=reason.reason;
         add(row,"td").innerText=""+reason.count;
-        add(row,"td").innerText=reason.answer || "";
+        add(row,"td").innerText=answer_of_version(reason.answer) || "";
     }
     // TODO adjust button enabledness
 }
@@ -64,6 +71,19 @@ function updateQuestion() {
     const reportDiv = add(mainDiv,"div");
     getWebJSON(getURL("../get_question",{question_id:question_id}),function(question) {
         pretty_show_question(infoDiv,question);
+        if (question.Ok && question.Ok.answers) {
+            for (const answer of question.Ok.answers) {
+                const answerbox = document.getElementById("answer_"+answer.version);
+                if (answerbox) {
+                    const cb = add(answerbox,"input");
+                    cb.type="checkbox";
+                    cb.id="answer_cb_"+answer.version;
+                    const label = add(answerbox,"label");
+                    label.for=cb.id;
+                    label.innerText="Censor";
+                }
+            }
+        }
         getWebJSON(getURL("../get_question_history",{question_id:question_id}),function(history) {
             pretty_show_history(historyDiv,question,history);
         },failure);

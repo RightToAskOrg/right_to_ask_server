@@ -25,8 +25,8 @@ function pretty_show_question(div,question) {
     add(id_div,"h2").innerText="Identity";
     add(id_div,"div").innerText="Question id : "+question.question_id;
     add(id_div,"div").innerText="Version  : "+question.version;
-    add(id_div,"div").innerText="Last modified  : "+question.last_modified+" seconds since 1970-01-01 00:00:00 UTC"
-    add(id_div,"div").innerText="Created  : "+question.timestamp+" seconds since 1970-01-01 00:00:00 UTC"
+    add(id_div,"div").innerText="Last modified  : "+prettyTime(question.last_modified);
+    add(id_div,"div").innerText="Created  : "+prettyTime(question.timestamp);
     add(div,"span").innerText="Author : "+question.author;
     if (question.background) {
         const background = add(div,"QuestionBackground");
@@ -41,9 +41,6 @@ function pretty_show_question(div,question) {
     }
     // TODO question.who_should_ask_the_question_permissions : Permissions,
     // TODO question.entity_who_should_answer_the_question : Permissions,
-    if (question.answers) for (const answer of question.answers) {
-        // TODO answer is of type QuestionAnswer, see question.rs for fields
-    }
     if (question.answer_accepted) {
         add(div,"div").innerText="Question answer accepted!"
     }
@@ -52,6 +49,16 @@ function pretty_show_question(div,question) {
         const link = add(div,"a");
         link.innerText="Question to which this is a follow up"; // This is the sort of grammar up with which we should not put.
         link.href = "ShowQuestion.html?question_id="+question.is_followup_to;
+    }
+    if (question.answers) {
+        add(div,"h2").innerText="Answers";
+        for (const answer of question.answers) {
+            const figure = add(div, "figure");
+            add(figure, "blockquote").innerText = answer.answer;
+            const caption = add(figure, "figcaption");
+            caption.innerText = answer.answered_by + " wearing hat as " + mp_id_tostring(answer.mp) + " time " + prettyTime(answer.timestamp);
+            caption.id="answer_"+answer.version; // Needed by moderation for a place to insert the hook to censor this answer.
+        }
     }
 }
 
@@ -68,17 +75,54 @@ function pretty_show_history(div,question,history) {
         add(div,"div","Error").innerText="Error : "+history.Err;
         return;
     } else {
-        if (history.Ok && history.Ok.history) for (const h of history.Ok.history) { // These are in reverse chronological order.
-            const bb = add(div,"div");
-            add(bb,"span").innerText="Bulletin board : ";
-            addLink(bb,h.id);
-            add(div,"div").innerText="Timestamp : "+h.timestamp;
-            if (h.action) {
-                // this is of type LogInBulletinBoard
-                let action = add(div,"div");
-                action.innerText=JSON.stringify(h.action); // what could be prettier? Especially as one field is sometimes a cryptographic signature of a JSON-serialized structure.
-            } else add(div,"span","censored").innerText="Censored";
+        if (history.Ok && history.Ok.history) {
+            const table = add(div,"table","striped");
+            const headrow = add(add(table,"thead"),"tr");
+            add(headrow,"th").innerText="time";
+            add(headrow,"th").innerText="user";
+            add(headrow,"th").innerText="action";
+            const tbody = add(table,"tbody");
+            for (const h of history.Ok.history) { // These are in reverse chronological order.
+                const tr = add(tbody,"tr");
+                add(tr,"td").innerText=prettyTime(h.timestamp);
+                // could have a link to bulletin board via addLink(where,h.id);
+                const who_cell = add(tr,"td");
+                const action_cell = add(tr,"td");
+                if (h.action) {
+                    // this is of type LogInBulletinBoard
+                    for (const field in h.action) {
+                        let command = h.action[field];
+                        if (command&&command.command && command.command.user)  who_cell.innerText=command.command.user;
+                    }
+                    if (h.action.EditQuestion) {
+                        action_cell.innerText="Edit Question";
+                        const command = h.action.EditQuestion.command;// TODO add actual fields edited.
+                        console.log(command);
+                    } else if (h.action.NewQuestion) {
+                        action_cell.innerText="New Question created";
+                        const command = h.action.NewQuestion.command;// TODO add actual fields edited.
+                        console.log(command);
+                    } else if (h.action.PlainTextVoteQuestion) {
+                        action_cell.innerText = "Voted";
+                        // should not be stored in history, but were in some old test data.
+                    } else if (h.action.CensorQuestion) {
+                        action_cell.innerText = "Censorship performed";
+                    } else {
+                        action_cell.innerText=JSON.stringify(h.action); // what could be prettier? Especially as one field is sometimes a cryptographic signature of a JSON-serialized structure.
+                    }
+                } else {
+                    action_cell.innerText="Content Censored";
+                    action_cell.className="Censored"
+                }
+            }
         }
     }
 
 }
+
+function prettyTime(timestamp) {
+    const date = new Date(timestamp*1000);
+    return date.toLocaleDateString();
+}
+
+function mp_id_tostring(mp) { return mp.first_name+" "+mp.surname+" ("+mp.electorate.chamber+(mp.electorate.region?(" "+mp.electorate.region):"")+")"; }
