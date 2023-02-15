@@ -180,24 +180,31 @@ impl FromValue for CensorshipStatus {
 #[derive(Serialize,Deserialize,Debug,Clone)]
 /// A command by an administrator to perform a censorship.
 pub struct CensorQuestionCommand {
-    pub reason : CensorshipReason,
+    /// If empty, allow it rather than censor it.
+    pub reason : Option<CensorshipReason>,
     /// If true, censor the logs as well. Otherwise just censor in the app.
     pub censor_logs : bool,
-    /// If set, don't censor the question, just the answer that was submitted in the given bulletin board entry.
-    #[serde(skip_serializing_if = "Option::is_none",default)]
-    pub just_answer : Option<HashValue>,
+    /// If set, don't censor the question, just the answer(s) that was submitted in the given bulletin board entry.
+    #[serde(skip_serializing_if = "Vec::is_empty",default)]
+    pub just_answer : Vec<HashValue>,
     pub question_id : QuestionID,
     /// the version number of the question being censored.
     pub version : HashValue,
+    /// the number of times it has been flagged at the time of review.
+    pub num_flags : usize,
 }
 
 impl CensorQuestionCommand {
     pub async fn censor_question(&self) -> Result<HashValue,QuestionError> {
+        println!("Got censorship request : {:?}",self);
         let question_info = QuestionInfo::lookup(self.question_id).await?.ok_or_else(||QuestionError::QuestionDoesNotExist)?;  // Makes sure the question exists and is not censored already.
         if question_info.version!=self.version { return Err(QuestionError::LastUpdateIsNotCurrent); }
         let timestamp = timestamp_now().map_err(internal_error)?;
         let mut removed : Vec<CensoredBulletinBoardQuestionElement> = Vec::new();
-        let version = if self.censor_logs { // work out exactly what we want to censor, and put it in "removed".
+        for &answer_id in &self.just_answer {
+            if !question_info.non_defining.answers.iter().any(|a|a.version==Some(answer_id) && a.censorship_status!=CensorshipStatus::Censored) { return Err(QuestionError::NotAnUncensoredAnswer)}
+        }
+        let version = if self.censor_logs && self.reason.is_some() { // work out exactly what we want to censor, and put it in "removed".
             let history = QuestionHistory::lookup(self.question_id).await?;
             for h in &history.history {
                 match &h.action {
@@ -206,15 +213,12 @@ impl CensorQuestionCommand {
                     _ => {} // don't censor user flags or censorship!
                 }
             }
-            if let Some(answer_id) = self.just_answer {
-                removed.retain(|e|e.id==answer_id);
-                if removed.len()!=1 { return Err(QuestionError::NotAnUncensoredAnswer)}
+            if !self.just_answer.is_empty() {
+                removed.retain(|e|self.just_answer.contains(&e.id));
+                if removed.len()!=self.just_answer.len() { return Err(QuestionError::CouldNotCensorQuestions)}
             }
             history.history[0].id
         } else {
-            if let Some(answer_id) = self.just_answer {
-                if !question_info.non_defining.answers.iter().any(|a|a.version==Some(answer_id) && a.censorship_status!=CensorshipStatus::Censored) { return Err(QuestionError::NotAnUncensoredAnswer)}
-            }
             question_info.version
         };
         let for_bb = CensorQuestionCommandPostedToBulletinBoard{
@@ -226,19 +230,24 @@ impl CensorQuestionCommand {
         let mut conn = get_rta_database_connection().await.map_err(internal_error)?;
         let mut transaction = conn.start_transaction(TxOpts::default()).map_err(internal_error)?;
         modify_question_database_version_and_time(&mut transaction,self.question_id,response,Some(version),timestamp).await?;
-        if let Some(answer_id) = self.just_answer {
-            transaction.exec_drop("update Answer set CensorshipStatus='Censored' where version=?", (answer_id.0,)).map_err(internal_error)?;
-            transaction.exec_drop("update QUESTIONS set NumFlags=NumFlags-??? where QuestionID=?", (self.question_id.0,)).map_err(internal_error)?; // TODO properly
-
-        } else { // censor the whole question
-            transaction.exec_drop("update QUESTIONS set CensorshipStatus='Censored' where QuestionID=?", (self.question_id.0,)).map_err(internal_error)?; // TODO update NumFlags
+        transaction.exec_drop("update QUESTIONS set NumFlags=NumFlags-? where QuestionID=?", (self.num_flags,self.question_id.0)).map_err(internal_error)?;
+        if self.reason.is_none() { // allow it if reason is not specified.
+            transaction.exec_drop("update QUESTIONS set CensorshipStatus='Allowed' where QuestionID=?", (self.question_id.0,)).map_err(internal_error)?;
+        } else {
+            if self.just_answer.is_empty() { // censor the whole question
+                transaction.exec_drop("update QUESTIONS set CensorshipStatus='Censored' where QuestionID=?", (self.question_id.0,)).map_err(internal_error)?;
+            } else {
+                for answer_id in &self.just_answer {
+                    transaction.exec_drop("update Answer set CensorshipStatus='Censored' where version=?", (answer_id.0,)).map_err(internal_error)?;
+                }
+            }
         }
         transaction.commit().map_err(internal_error)?;
         // TODO it would make sense to put some message in the BB saying that the just posted entry did not make it into the database for some reason if there were an error above.
         for remove in removed { // don't censor things until stored in the database otherwise we will be unhappy.
             get_bulletin_board().await.censor_leaf(remove.id).map_err(bulletin_board_error)?;
         }
-        remove_question_from_comparison_database(self.question_id).await.map_err(internal_error)?;
+        if self.reason.is_none() && self.just_answer.is_empty() { remove_question_from_comparison_database(self.question_id).await.map_err(internal_error)?; }
         Ok(response)
     }
 }

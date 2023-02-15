@@ -82,6 +82,8 @@ pub enum QuestionError {
     BulletinBoardHistoryIsCorrupt,
     /// Trying to report or censor an answer that is either not an answer to the question or is already censored.
     NotAnUncensoredAnswer,
+    /// Like above, but also could be because it could not be found in the bulletin board.
+    CouldNotCensorQuestions,
     HansardLinkIsNotURL,
     /// The Hansard link URL does not satisfy the sanitization filters.
     HansardLinkIsNotAllowed,
@@ -367,7 +369,7 @@ pub struct QuestionAnswer {
 impl QuestionAnswer {
     /// Get the answers to a question.
     fn get_for_question(conn:&mut impl Queryable,question:QuestionID) -> mysql::Result<Vec<QuestionAnswer>> {
-        let entries : Vec<(UserUID,MPIndexInDatabaseTable,Timestamp,String,CensorshipStatus,mysql::Value)> = conn.exec("SELECT USERS.UID,mp,timestamp,answer,CensorshipStatus,version from Answer inner join USERS ON Answer.AuthorId=USERS.id where QuestionId=? order by timestamp",(&question.0,))?;
+        let entries : Vec<(UserUID,MPIndexInDatabaseTable,Timestamp,String,CensorshipStatus,mysql::Value)> = conn.exec("SELECT USERS.UID,mp,timestamp,answer,CensorshipStatus,version from Answer inner join USERS ON Answer.AuthorId=USERS.id where QuestionId=? and CensorshipStatus!='Censored' order by timestamp",(&question.0,))?;
         let mut res : Vec<QuestionAnswer> = vec![];
         for (answered_by,mp,timestamp,answer,censorship_status,version) in entries {
             if let Some(mp_id) = MPId::read_from_database(conn,mp)? {
