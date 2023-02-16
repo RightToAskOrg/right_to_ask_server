@@ -18,7 +18,9 @@ create table if not exists USERS
     DisplayName VARCHAR(60),
     AusState    VARCHAR(3),
     PublicKey   TEXT NOT NULL,
-    INDEX(UID)
+    UPPER_CASE_UID VARCHAR(30) generated always as (UPPER(UID)),
+    UNIQUE INDEX(UID),
+    UNIQUE INDEX UPPER_CASE_UID (UPPER_CASE_UID)
 ) CHARACTER SET utf8;
 
 /* The definition of an electorate, referred to in UserElectorate by the id */
@@ -258,5 +260,5 @@ create table SchemaVersion
     version INT
 );
 
-insert into SchemaVersion (version) values (8);
+insert into SchemaVersion (version) values (9);
 

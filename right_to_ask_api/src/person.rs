@@ -204,8 +204,8 @@ impl NewRegistration {
 
     pub async fn register(&self) -> Result<HashValue,RegistrationError> {
         if self.uid.len()<1 { return Err(RegistrationError::UIDTooShort); }
-        if self.uid.len()>30 { return Err(RegistrationError::UIDTooLong); }
         if !self.uid.chars().all(|c|c.is_ascii_alphanumeric()||c.is_ascii_punctuation()) { return Err(RegistrationError::UIDContainsIllegalCharacters); }
+        if self.uid.len()>30 { return Err(RegistrationError::UIDTooLong); }
         if let Some(dn) = self.display_name.as_ref() {
             if dn.len()<1 { return Err(RegistrationError::DisplayNameTooShort); }
             if dn.len()>60 { return Err(RegistrationError::DisplayNameTooLong); }
