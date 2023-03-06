@@ -3,6 +3,7 @@
 //! The field `rta` should contain something like "mysql://bulletinboard:ThisShouldBeReplacedByAPassword@localhost:3306/bulletinboard" without the quotes, and with the password something sensible.
 //! The file `bulletinboard` should contain something like "mysql://bulletinboard:ThisShouldBeReplacedByAPassword@localhost:3306/bulletinboard" without the quotes, and with the password something sensible.
 
+use std::io::ErrorKind;
 use std::ops::DerefMut;
 use anyhow::anyhow;
 use mysql::{Pool, PooledConn, Conn, Opts};
@@ -45,12 +46,14 @@ fn get_bulletin_board_connection() -> Conn {
     Conn::new(opts).expect("Could not connect to bulletin board database")
 }
 
+const JOURNAL_PATH: &str = if cfg!(test) {"testjournal"} else {"journal"};
+
 /// Get the main bulletin board object. Idempotent (well, within MutexGuard)
 pub async fn get_bulletin_board() -> MutexGuard<'static,BulletinBoard<BackendJournal<BackendMysql<Box<Conn>>>>> {
     static BACKEND : Lazy<Mutex<BulletinBoard<BackendJournal<BackendMysql<Box<Conn>>>>>> = Lazy::new(|| {
         let conn = get_bulletin_board_connection();
         let backend = merkle_tree_bulletin_board_backend_mysql::BackendMysql{ connection: std::sync::Mutex::new(Box::new(conn)) };
-        let backend_journal = BackendJournal::new(backend,"journal",StartupVerification::SanityCheckAndRepairPending).expect("Cannot create journal");
+        let backend_journal = BackendJournal::new(backend,JOURNAL_PATH,StartupVerification::SanityCheckAndRepairPending).expect("Cannot create journal");
         let bulletin_board = BulletinBoard::new(backend_journal).expect("Cannot create bulletin board");
         Mutex::new(bulletin_board)
     });
@@ -93,6 +96,11 @@ impl LogInBulletinBoard {
 
 /// Delete all data and recreate the schema.
 pub fn initialize_bulletin_board_database() -> anyhow::Result<()> {
+    match std::fs::remove_dir_all(JOURNAL_PATH) {
+        Ok(_) => {}
+        Err(e) if e.kind()==ErrorKind::NotFound => {} // OK, only need to delete it if it was there. Could check with Path::exists() but there would be a race condition.
+        Err(e) => { Err(e)? }
+    }
     let mut conn = get_bulletin_board_connection();
     conn.query_drop("drop table if exists PUBLISHED_ROOTS")?;
     conn.query_drop("drop table if exists PUBLISHED_ROOT_REFERENCES")?;
@@ -133,7 +141,7 @@ pub fn initialize_right_to_ask_database() -> anyhow::Result<()> {
 static GENERAL_VOCABULARY_WORDS : Lazy<WordsInFile> = Lazy::new(|| { WordsInFile::read_word_file(WORD_MMAP_FILE).unwrap()  });
 static LISTED_KEYWORDS : Lazy<ListedKeywords> = Lazy::new(|| { ListedKeywords::load(ListedKeywords::STD_LOCATION).unwrap()  });
 
-const WORD_COMPARISON_PATH: &str = "data/WordComparison/Database.txt";
+const WORD_COMPARISON_PATH: &str = if cfg!(test) {"testdata/WordComparison/Database.txt"} else {"data/WordComparison/Database.txt"};
 static WORD_COMPARISON_BACKEND : Lazy<Mutex<FlatfileDatabaseBackend<HashValue>>> = Lazy::new(|| { Mutex::new(FlatfileDatabaseBackend::<HashValue>::new(WORD_COMPARISON_PATH,&GENERAL_VOCABULARY_WORDS,&LISTED_KEYWORDS).unwrap())  });
 
 /// Add a new question to the comparison_database. Typically done
@@ -163,7 +171,7 @@ pub async fn find_similar_text_question(question:&str) -> anyhow::Result<Vec<Sco
 pub async fn recreate_word_comparison_database() -> anyhow::Result<()> {
     println!("Extracting existing questions");
     let mut conn = get_rta_database_connection().await?;
-    let questions : Vec<(HashValue,String)> = conn.exec_map("SELECT QuestionId,Question from QUESTIONS where censored=FALSE",(),|(id,question)|(hash_from_value(id),question))?;
+    let questions : Vec<(HashValue,String)> = conn.exec_map("SELECT QuestionId,Question from QUESTIONS where CensorshipStatus!='Censored'",(),|(id,question)|(hash_from_value(id),question))?;
     println!("Recreating database");
     {
         let mut backend =  WORD_COMPARISON_BACKEND.lock().await;
@@ -174,4 +182,19 @@ pub async fn recreate_word_comparison_database() -> anyhow::Result<()> {
         add_question_to_comparison_database(&question,id).await?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::config::change_directory_to_one_containing_config_file;
+    use crate::database::{check_rta_database_version_current, initialize_bulletin_board_database, initialize_right_to_ask_database, recreate_word_comparison_database};
+
+    #[tokio::test]
+    async fn can_create_test_database() {
+        change_directory_to_one_containing_config_file();
+        initialize_right_to_ask_database().unwrap();
+        initialize_bulletin_board_database().unwrap();
+        recreate_word_comparison_database().await.unwrap();
+        check_rta_database_version_current().await.unwrap();
+    }
 }

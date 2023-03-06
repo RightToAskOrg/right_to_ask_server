@@ -1,15 +1,23 @@
 
-drop table if exists USERS;
-drop table if exists ELECTORATES;
-drop table if exists BADGES;
-drop table if exists QUESTIONS;
-drop table if exists HAS_VOTED;
-drop table if exists MP_IDs;
-drop table if exists Organisations;
-drop table if exists Committee_IDs;
-drop table if exists Minister_IDs;
-drop table if exists PersonForQuestion;
+drop table if exists SchemaVersion;
+drop table if exists AnswerReportedReasons;
+drop table if exists QuestionReportedReasons;
+drop table if exists EmailRateLimitHistory;
+drop table if exists DoNotEmail;
+drop table if exists HansardLink;
 drop table if exists Answer;
+drop table if exists PersonForQuestion;
+drop table if exists Organisations;
+drop table if exists Minister_IDs;
+drop table if exists Committee_IDs;
+drop table if exists MP_IDs;
+drop table if exists HAS_VOTED;
+drop table if exists QUESTIONS;
+drop table if exists BADGES;
+drop table if exists UserElectorate;
+drop table if exists ElectorateDefinition;
+drop table if exists USERS;
+
 
 create table if not exists USERS
 (

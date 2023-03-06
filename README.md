@@ -53,6 +53,18 @@ FLUSH PRIVILEGES;
 EXIT
 ```
 
+If you are setting up a server that also wants to run unit tests that check the database,
+then also create a unit test copy of each database. Note that this is *only* needed if you are
+running the unit tests.
+```sql
+CREATE DATABASE IF NOT EXISTS unit_test_bulletinboard;
+GRANT ALL PRIVILEGES ON unit_test_bulletinboard.* TO 'bulletinboard'@'localhost' IDENTIFIED BY 'stick-the-bulletin-board-password-here';
+CREATE DATABASE IF NOT EXISTS unit_test_RightToAsk;
+GRANT ALL PRIVILEGES ON unit_test_RightToAsk.* TO 'RightToAsk'@'localhost' IDENTIFIED BY 'stick-the-rta-password-here';
+FLUSH PRIVILEGES;
+EXIT
+```
+
 ### Setting up configuration
 
 Create a file `config.toml` in the directory that you intend to run the server

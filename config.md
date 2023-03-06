@@ -90,3 +90,16 @@ secret = "stick-your-password-here"
 There is an intention of (optionally) allowing other credentials such as for AWS email.
 
 
+# Unit tests for database - test_config.toml
+
+Some unit tests, when running, require a database to execute against. These us a file with the
+same format called test_config.toml
+
+The unit tests are normally run in the directory of the crate - the unit tests requiring test_config.toml
+will first change directory to the parent directory if that contains a test_config.toml file but the 
+main directory does not.
+
+You will usually want to use a different database for the unit tests - most if not all such unit tests 
+will erase and re-initialize the database.
+
+

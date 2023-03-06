@@ -1,15 +1,13 @@
-
-
-
 use once_cell::sync::Lazy;
 use std::fs;
+use std::path::Path;
 use std::str::FromStr;
 use lettre::address::AddressError;
 use lettre::message::Mailbox;
 use lettre::transport::smtp::authentication::Credentials;
 use serde::{Serialize,Deserialize};
 
-const CONFIG_FILE_NAME: &str = "config.toml";
+const CONFIG_FILE_NAME: &str = if cfg!(test) {"test_config.toml"} else {"config.toml"};
 
 #[derive(Deserialize)]
 pub struct Config {
@@ -63,7 +61,18 @@ pub(crate) struct DatabaseURLs {
     pub bulletinboard : String, // BulletinBoard url
 }
 pub static CONFIG : Lazy<Config> = Lazy::new(|| {
-    let file = fs::read_to_string(CONFIG_FILE_NAME).expect("Could not read config.toml");
-    let config : Config = toml::de::from_str(&file).expect("Could not parse config.toml");
+    let file = fs::read_to_string(CONFIG_FILE_NAME).expect(&format!("Could not read {}",CONFIG_FILE_NAME));
+    let config : Config = toml::de::from_str(&file).expect(&format!("Could not parse {}",CONFIG_FILE_NAME));
     config
 });
+
+#[cfg(test)]
+pub fn change_directory_to_one_containing_config_file() {
+    if Path::new(CONFIG_FILE_NAME).exists() { return; }
+    let up_a_folder = format!("../{}",CONFIG_FILE_NAME);
+    if Path::new(&up_a_folder).exists() {
+        std::env::set_current_dir("..").unwrap();
+    } else {
+        panic!("Could not find config file {} either in the current working directory or its parent",CONFIG_FILE_NAME);
+    }
+}

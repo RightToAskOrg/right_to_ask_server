@@ -1,6 +1,7 @@
 /target
 Cargo.lock
 config.toml
+test_config.toml
 /GeneralVocabulary.bin
 /ListedKeywords.csv
 /SampleTextDatabase.txt
