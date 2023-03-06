@@ -185,16 +185,21 @@ pub async fn recreate_word_comparison_database() -> anyhow::Result<()> {
 }
 
 #[cfg(test)]
+pub async fn recreate_test_databases() {
+    crate::config::change_directory_to_one_containing_config_file();
+    initialize_right_to_ask_database().unwrap();
+    initialize_bulletin_board_database().unwrap();
+    recreate_word_comparison_database().await.unwrap();
+    check_rta_database_version_current().await.unwrap();
+}
+
+#[cfg(test)]
 mod tests {
-    use crate::config::change_directory_to_one_containing_config_file;
-    use crate::database::{check_rta_database_version_current, initialize_bulletin_board_database, initialize_right_to_ask_database, recreate_word_comparison_database};
+    use crate::database::recreate_test_databases;
 
     #[tokio::test]
     async fn can_create_test_database() {
-        change_directory_to_one_containing_config_file();
-        initialize_right_to_ask_database().unwrap();
-        initialize_bulletin_board_database().unwrap();
-        recreate_word_comparison_database().await.unwrap();
-        check_rta_database_version_current().await.unwrap();
+        recreate_test_databases().await;
+
     }
 }

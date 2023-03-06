@@ -1,6 +1,5 @@
 use once_cell::sync::Lazy;
 use std::fs;
-use std::path::Path;
 use std::str::FromStr;
 use lettre::address::AddressError;
 use lettre::message::Mailbox;
@@ -68,9 +67,9 @@ pub static CONFIG : Lazy<Config> = Lazy::new(|| {
 
 #[cfg(test)]
 pub fn change_directory_to_one_containing_config_file() {
-    if Path::new(CONFIG_FILE_NAME).exists() { return; }
+    if std::path::Path::new(CONFIG_FILE_NAME).exists() { return; }
     let up_a_folder = format!("../{}",CONFIG_FILE_NAME);
-    if Path::new(&up_a_folder).exists() {
+    if std::path::Path::new(&up_a_folder).exists() {
         std::env::set_current_dir("..").unwrap();
     } else {
         panic!("Could not find config file {} either in the current working directory or its parent",CONFIG_FILE_NAME);
