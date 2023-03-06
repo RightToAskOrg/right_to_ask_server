@@ -419,11 +419,16 @@ const ALLOWED_HOSTS: [&'static str; 9] = ["www.aph.gov.au",
 ];
 
 impl HansardLink {
+
+    /// return true if host is the given allowed host, or a subdomain of it.
+    fn is_host_allowed_or_subdomain(host:&str,allowed_host:&str) -> bool {
+        host==allowed_host || host.ends_with(&format!(".{}",allowed_host))
+    }
     /// Return OK if this seems like a safe URL.
     fn check_ok(&self) -> Result<(),QuestionError> {
         let url = Url::parse(&self.url).map_err(|_|QuestionError::HansardLinkIsNotURL)?;
         if let Some(Host::Domain(host)) = url.host() {
-            if !ALLOWED_HOSTS.iter().any(|&h|h==host) { return Err(QuestionError::HansardLinkIsNotAllowed)}
+            if !ALLOWED_HOSTS.iter().any(|&h|Self::is_host_allowed_or_subdomain(host,h)) { return Err(QuestionError::HansardLinkIsNotAllowed)}
             Ok(())
         } else { return Err(QuestionError::HansardLinkIsNotURL) }
     }
