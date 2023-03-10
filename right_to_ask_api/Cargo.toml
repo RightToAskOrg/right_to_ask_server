@@ -13,16 +13,16 @@ serde_with = "2.1"
 once_cell = "1.13"
 futures = "0.3"
 anyhow = "1.0"
-merkle-tree-bulletin-board = "0.2"
+merkle-tree-bulletin-board = "0.3"
 mysql = "23.0"
 mysql_common = { version="0.29.1", features=["frunk"]}
-merkle-tree-bulletin-board-backend-mysql = "0.2"
+merkle-tree-bulletin-board-backend-mysql = "0.3"
 # If you want to use the library directly to test { path="../../bulletin-board/merkle-tree-bulletin-board-backend-mysql" }
 ed25519-dalek = "1.0"
-base64 = "0.20"
-toml = "0.5"
+base64 = "0.21"
+toml = "0.7"
 hex = "0.4"
-pkcs8 = {version = "0.9", features = ["alloc"] }
+pkcs8 = {version = "0.10", features = ["alloc"] }
 csv = "1.1"
 reqwest = { version = "0.11", features = ["blocking", "json"] }
 tempfile = "3.3"
@@ -37,7 +37,7 @@ clap = { version = "3.2", features = ["derive"] }
 encoding_rs = "0.8"
 encoding_rs_io = "0.1"
 url = "2.2.2"
-lru = "0.9"
+lru = "0.10"
 lettre = { version = "0.10", features=["smtp-transport","tokio1","tokio1-native-tls","serde"]}
 # Just used for binaries. May be removed in future.
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1.26", features = ["full"] }

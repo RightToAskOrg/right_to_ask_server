@@ -11,7 +11,7 @@ use once_cell::sync::Lazy;
 use futures::lock::{Mutex, MutexGuard};
 use merkle_tree_bulletin_board::backend_journal::{BackendJournal, StartupVerification};
 use merkle_tree_bulletin_board_backend_mysql::BackendMysql;
-use merkle_tree_bulletin_board::BulletinBoard;
+use merkle_tree_bulletin_board::{BulletinBoard, BulletinBoardError};
 use merkle_tree_bulletin_board::hash::HashValue;
 use mysql::prelude::Queryable;
 use crate::config::CONFIG;
@@ -87,7 +87,7 @@ pub enum LogInBulletinBoard {
 }
 
 impl LogInBulletinBoard {
-    pub async fn log_in_bulletin_board(&self) -> anyhow::Result<HashValue> {
+    pub async fn log_in_bulletin_board(&self) -> Result<HashValue,BulletinBoardError> {
         let mut board = get_bulletin_board().await;
         let data = serde_json::ser::to_string(self).unwrap();
         board.submit_leaf(&data)

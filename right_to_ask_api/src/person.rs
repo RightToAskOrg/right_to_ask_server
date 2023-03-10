@@ -12,6 +12,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use lettre::Message;
 use lettre::message::{Mailbox, MultiPart, SinglePart};
+use merkle_tree_bulletin_board::BulletinBoardError;
 use mysql::{TxOpts, Value, FromValueError, Transaction};
 use crate::database::{get_rta_database_connection, LogInBulletinBoard};
 use mysql::prelude::{Queryable, ConvIr, FromValue};
@@ -67,10 +68,16 @@ pub enum RegistrationError {
     InternalError,
     CouldNotWriteToBulletinBoard,
     NoSuchUser, // when editing a user. Unlikely to ever occur except when a concurrent UID change is happening.
+    IdenticalDataAlreadySubmitted,
 }
-fn bulletin_board_error(error:anyhow::Error) -> RegistrationError {
-    eprintln!("Bulletin Board error {:?}",error);
-    RegistrationError::CouldNotWriteToBulletinBoard
+fn bulletin_board_error(error:BulletinBoardError) -> RegistrationError {
+    match error {
+        BulletinBoardError::IdenticalDataAlreadySubmitted => RegistrationError::IdenticalDataAlreadySubmitted,
+        _ => {
+            eprintln!("Bulletin Board error {:?}",error);
+            RegistrationError::CouldNotWriteToBulletinBoard
+        }
+    }
 }
 fn internal_error<T:Debug>(error:T) -> RegistrationError {
     eprintln!("Internal error {:?}",error);
@@ -230,7 +237,7 @@ pub async fn get_count_of_all_users() -> mysql::Result<usize> {
     Ok(elements)
 }
 
-pub async fn get_user_by_id(uid:&UserUID) -> mysql::Result<Option<UserInfo>> {
+pub async fn get_user_by_id(uid:&str) -> mysql::Result<Option<UserInfo>> {
     let mut conn = get_rta_database_connection().await?;
     if let Some((user_id,display_name,state,public_key)) = conn.exec_first::<(u64,Option<String>,Option<State>,PublicKey),_,_>("SELECT id,DisplayName,AusState,PublicKey from USERS where UID=?",(uid,))? {
         let electorates = conn.exec_map("SELECT Chamber,Electorate from UserElectorate inner join ElectorateDefinition on UserElectorate.electorate_id = ElectorateDefinition.id where UserElectorate.user_id=?",(user_id,),|(chamber,location)|Electorate{ chamber, region: location })?;
@@ -279,6 +286,7 @@ pub enum EmailValidationError {
     WrongCode,
     InternalError,
     CouldNotWriteToBulletinBoard,
+    IdenticalDataAlreadySubmitted,
     MPEmailNotKnown,
     BadgeNameDoesNotMatchEmailAddress,
     AlreadyHaveBadge,
@@ -303,9 +311,15 @@ fn internal_error_email<T:Debug>(error:T) -> EmailValidationError {
     eprintln!("Internal error {:?}",error);
     EmailValidationError::InternalError
 }
-fn bulletin_board_error_email(error:anyhow::Error) -> EmailValidationError {
-    eprintln!("Bulletin Board error {:?}",error);
-    EmailValidationError::CouldNotWriteToBulletinBoard
+
+fn bulletin_board_error_email(error:BulletinBoardError) -> EmailValidationError {
+    match error {
+        BulletinBoardError::IdenticalDataAlreadySubmitted => EmailValidationError::IdenticalDataAlreadySubmitted,
+        _ => {
+            eprintln!("Bulletin Board error {:?}",error);
+            EmailValidationError::CouldNotWriteToBulletinBoard
+        }
+    }
 }
 
 /// Information to request that an email be sent asking for verification.
@@ -646,5 +660,63 @@ impl EditUserDetails {
             transaction.exec_drop("insert into UserElectorate (user_id,electorate_id) values (?,?)",(user_id,electorate_id))?;
         }
         Ok(())
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use crate::database::recreate_test_databases;
+    use crate::person::{EditUserDetails, get_user_by_id, NewRegistration, RegistrationError};
+    use crate::regions::{Chamber, Electorate, State};
+    use crate::signing::{DEFAULT_TESTING_PUBLIC_KEY, make_test_signed};
+
+    async fn change_name_of_a_user(instance:usize) {
+        println!("Starting change name {}",instance);
+        let change_name = EditUserDetails{
+            display_name: Some(format!("Changed To {}",instance)),
+            state: None,
+            electorates: None,
+        };
+        // tokio::time::sleep(std::time::Duration::from_millis((20-instance as u64)*50)).await;
+        let signed_change_name = make_test_signed("test_user",&change_name,()).await;
+        EditUserDetails::edit_user(&signed_change_name).await.unwrap();
+        println!("Ending change name {}",instance);
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn can_create_and_modify_user() {
+        recreate_test_databases().await;
+        let registration = NewRegistration{
+            uid: "test_user".to_string(),
+            display_name: Some("Test User".to_string()),
+            public_key: DEFAULT_TESTING_PUBLIC_KEY.to_string(),  // This is the test key used in the test website. Don't use it for a real user.
+            state: Some(State::VIC),
+            electorates: vec![Electorate{ chamber: Chamber::Australian_Senate, region: Some("VIC".to_string()) }],
+        };
+        registration.register().await.unwrap();
+        assert_eq!(registration.register().await,Err(RegistrationError::UIDAlreadyTaken));
+        let change_name = EditUserDetails{
+            display_name: Some("New Name".to_string()),
+            state: None,
+            electorates: None,
+        };
+        let signed_change_name = make_test_signed("test_user",&change_name,()).await;
+        EditUserDetails::edit_user(&signed_change_name).await.unwrap();
+        assert_eq!(None,get_user_by_id(&"invalid_user").await.unwrap());
+        let ui = get_user_by_id("test_user").await.unwrap().unwrap();
+        assert_eq!("test_user",&ui.uid);
+        assert_eq!("New Name",ui.display_name.as_ref().unwrap());
+        assert_eq!(Some(State::VIC),ui.state);
+        assert_eq!(vec![Electorate{ chamber: Chamber::Australian_Senate, region: Some("VIC".to_string()) }],ui.electorates);
+        assert_eq!(DEFAULT_TESTING_PUBLIC_KEY,&ui.public_key);
+        let mut set = tokio::task::JoinSet::new();
+        for i in 1..10 {
+            set.spawn(async move { change_name_of_a_user(i).await });
+        }
+        while let Some(_x) = set.join_next().await { }
+        for _i in 1..10 {
+            set.spawn(async move { change_name_of_a_user(11).await });
+        }
+        while let Some(_x) = set.join_next().await { }
     }
 }

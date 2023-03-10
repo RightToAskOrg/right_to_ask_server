@@ -10,6 +10,7 @@ use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use std::fmt::{Debug, Display, Formatter};
 use futures::lock::{Mutex, MutexGuard};
+use merkle_tree_bulletin_board::BulletinBoardError;
 use serde::{Serialize, Deserialize};
 use merkle_tree_bulletin_board::hash::HashValue;
 use merkle_tree_bulletin_board::hash_history::{Timestamp, timestamp_now};
@@ -45,6 +46,7 @@ pub enum QuestionError {
     AuthorIsNotRegistered,
     InternalError,
     CouldNotWriteToBulletinBoard,
+    IdenticalDataAlreadySubmitted,
     QuestionTooShort,
     QuestionTooLong,
     YouJustAskedThatQuestion, // within the last 24 hours
@@ -675,11 +677,15 @@ pub(crate) fn internal_error<T:Debug>(error:T) -> QuestionError {
     eprintln!("Internal error {:?}",error);
     QuestionError::InternalError
 }
-pub(crate) fn bulletin_board_error(error:anyhow::Error) -> QuestionError {
-    eprintln!("Bulletin Board error {:?}",error);
-    QuestionError::CouldNotWriteToBulletinBoard
+pub(crate) fn bulletin_board_error(error:BulletinBoardError) -> QuestionError {
+    match error {
+        BulletinBoardError::IdenticalDataAlreadySubmitted => QuestionError::IdenticalDataAlreadySubmitted,
+        _ => {
+            eprintln!("Bulletin Board error {:?}",error);
+            QuestionError::CouldNotWriteToBulletinBoard
+        }
+    }
 }
-
 impl NewQuestionCommand {
 
     /// API function to add a question to the server
