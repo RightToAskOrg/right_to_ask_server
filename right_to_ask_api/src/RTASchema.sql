@@ -26,6 +26,9 @@ create table if not exists USERS
     DisplayName VARCHAR(60),
     AusState    VARCHAR(3),
     PublicKey   TEXT NOT NULL,
+    VerifiedEmail TEXT NULL,
+    VerifiedEmailTimestamp BIGINT UNSIGNED NULL,
+    Blocked BOOLEAN NOT NULL DEFAULT FALSE,
     UPPER_CASE_UID VARCHAR(30) generated always as (UPPER(UID)),
     UNIQUE INDEX(UID),
     UNIQUE INDEX UPPER_CASE_UID (UPPER_CASE_UID)
@@ -268,5 +271,5 @@ create table SchemaVersion
     version INT
 );
 
-insert into SchemaVersion (version) values (9);
+insert into SchemaVersion (version) values (10);
 

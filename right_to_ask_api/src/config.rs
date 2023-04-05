@@ -14,6 +14,8 @@ pub struct Config {
     pub(crate) database : DatabaseURLs,
     pub(crate) search_cache_size : std::num::NonZeroUsize,
     #[serde(default)]
+    pub(crate) require_validated_email: bool, // this will be removed in the future when it is required.
+    #[serde(default)]
     pub(crate) email : Option<EmailConfig>,
 }
 

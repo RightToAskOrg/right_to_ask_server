@@ -2,6 +2,7 @@
 
 function getWhy() {
     switch (document.getElementById("Purpose").value) {
+        case "AccountValidation" : return "AccountValidation";
         case "MP" : return {"AsMP":true};
         case "MPStaffer" : return  {"AsMP":false};
         case "Org" : return "AsOrg";
@@ -15,14 +16,26 @@ function getWhy() {
 
 let email_id = null;
 
-
+function reportAcceptedProof(signature) {
+    if (signature) {
+        check_signature(signature);
+        status("The server believes you! Bulletin board "+signature.message);
+    } else {
+        status("The server believes you but didn't put anything on the bulletin board.")
+    }
+}
 function RequestEmail() {
     function success(result) {
         console.log(result);
         if (result.Ok) {
-            check_signature(result.Ok);
-            email_id = result.Ok.message;
-            status("Requested email successfully and verified signature. Email id "+email_id);
+            if (result.Ok.EmailSent) {
+                email_id = result.Ok.EmailSent;
+                status("Requested email successfully. Email id "+email_id);
+            } else if (result.Ok.hasOwnProperty("AlreadyValidated")) {
+                reportAcceptedProof(result.Ok.AlreadyValidated);
+            } else {
+                status("I Don't understand the server")
+            }
         } else {
             status("Tried request email. Got Error message "+result.Err);
         }
@@ -39,9 +52,8 @@ function RequestEmail() {
 function VerifyCode() {
     function success(result) {
         console.log(result);
-        if (result.Ok) {
-            check_signature(result.Ok);
-            status("Code verified successfully and verified signature. Bulletin board "+result.Ok.message);
+        if (result.hasOwnProperty("Ok")) {
+            reportAcceptedProof(result.Ok);
         } else if (result.Err) {
             status("Tried request email. Got Error message "+result.Err);
         } else {

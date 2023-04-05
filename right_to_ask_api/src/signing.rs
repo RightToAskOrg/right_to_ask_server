@@ -117,6 +117,8 @@ pub enum SignatureCheckError {
     InvalidPublicKeyFormat,
     InvalidSignatureFormat,
     BadSignature,
+    UserBlocked,
+    UserUnregistered,
 }
 impl Display for SignatureCheckError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -127,9 +129,11 @@ impl Display for SignatureCheckError {
 impl <U> ClientSignedUnparsed<U> {
 
     /// Check the signature, return Ok(()) if good, otherwise an error.
-    pub async fn check_signature(&self) -> Result<(), SignatureCheckError> {
-        if let Some(public_key) = get_user_public_key_by_id(&self.user).await.map_err(|_| SignatureCheckError::InternalError)? {
-            let public_key = base64_decode(&public_key).map_err(|_| SignatureCheckError::InvalidPublicKeyFormat)?;
+    pub async fn check_signature(&self,need_to_have_validated_email:bool) -> Result<(), SignatureCheckError> {
+        if let Some(signing_info) = get_user_public_key_by_id(&self.user).await.map_err(|_| SignatureCheckError::InternalError)? {
+            if signing_info.blocked { return Err(SignatureCheckError::UserBlocked); }
+            if CONFIG.require_validated_email && need_to_have_validated_email && !signing_info.email_validated { return Err(SignatureCheckError::UserUnregistered); }
+            let public_key = base64_decode(&signing_info.public_key).map_err(|_| SignatureCheckError::InvalidPublicKeyFormat)?;
             let public_key = PublicKey::from_bytes(&public_key).map_err(|_| SignatureCheckError::InvalidPublicKeyFormat)?;
             let signature = base64_decode(&self.signature).map_err(|_| SignatureCheckError::InvalidSignatureFormat)?;
             let signature = Signature::from_bytes(&signature).map_err(|_| SignatureCheckError::InvalidSignatureFormat)?;
@@ -185,7 +189,7 @@ pub async fn make_test_signed<T:Serialize+DeserializeOwned,U:DeserializeOwned>(u
     unparsed.try_into().expect("Could not parse the signed client")
 }
 
-#[derive(Serialize,Deserialize)] // deserialization probably won't be needed.
+#[derive(Serialize,Deserialize,Debug,Clone)] // deserialization probably won't be needed.
 pub struct ServerSigned {
     message : String,
     signature : String

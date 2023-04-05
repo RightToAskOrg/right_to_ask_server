@@ -17,6 +17,7 @@ use mysql::{TxOpts, Value, FromValueError, Transaction};
 use crate::database::{get_rta_database_connection, LogInBulletinBoard};
 use mysql::prelude::{Queryable, ConvIr, FromValue};
 use merkle_tree_bulletin_board::hash::HashValue;
+use merkle_tree_bulletin_board::hash_history::{Timestamp, timestamp_now};
 use once_cell::sync::Lazy;
 use rand::Rng;
 use sha2::{Digest, Sha256};
@@ -253,6 +254,43 @@ pub async fn get_user_by_id(uid:&str) -> mysql::Result<Option<UserInfo>> {
     } else {Ok(None)}
 }
 
+#[derive(serde::Deserialize)]
+/// A command to block or unblock a user
+pub struct BlockUserCommand {
+    pub uid : String,
+    pub block : bool,
+}
+
+#[derive(serde::Serialize)]
+pub enum BlockUserError {
+    InternalError,
+    NoSuchUser,
+    AlreadyBlocked,
+    AlreadyUnblocked,
+}
+
+fn internal_error_block_user<T:Debug>(error:T) -> BlockUserError {
+    eprintln!("Internal error {:?}",error);
+    BlockUserError::InternalError
+}
+impl BlockUserCommand {
+    pub async fn apply(&self) -> Result<(),BlockUserError> {
+        let mut conn = get_rta_database_connection().await.map_err(internal_error_block_user)?;
+        let mut transaction = conn.start_transaction(TxOpts::default()).map_err(internal_error_block_user)?;
+        let already_blocked : Option<bool> = transaction.exec_first("select blocked from USERS where UID=?",(&self.uid,)).map_err(internal_error_block_user)?;
+        match already_blocked {
+            None => return Err(BlockUserError::NoSuchUser),
+            Some(true) if self.block => return Err(BlockUserError::AlreadyBlocked),
+            Some(false) if !self.block => return Err(BlockUserError::AlreadyUnblocked),
+            _ => {}
+        }
+        transaction.exec_drop("update USERS set Blocked = ? where UID=?",(self.block,&self.uid)).map_err(internal_error_block_user)?;
+        transaction.commit().map_err(internal_error_block_user)?;
+        Ok(())
+    }
+}
+
+
 /// Make a list of users who have a search string as a subset of their UID or DisplayName (case insensitive).
 /// want_badges says whether badges are wanted as well (significantly more expensive).
 pub async fn search_for_users(search:&str,want_badges:bool) -> mysql::Result<Vec<MiniUserInfo>> {
@@ -274,9 +312,18 @@ pub fn user_exists(uid:&UserUID,conn:&mut impl Queryable) -> mysql::Result<bool>
     Ok(count>0)
 }
 
-pub async fn get_user_public_key_by_id(uid:&UserUID) -> mysql::Result<Option<String>> {
+pub struct UserSigningInfo {
+    pub public_key : String,
+    pub blocked : bool,
+    pub email_validated : bool,
+}
+pub async fn get_user_public_key_by_id(uid:&UserUID) -> mysql::Result<Option<UserSigningInfo>> {
     let mut conn = get_rta_database_connection().await?;
-    conn.exec_first("SELECT PublicKey from USERS where UID=?",(uid,))
+    if let Some((public_key,blocked,email_validated)) = conn.exec_first::<(String,bool,bool),_,_>("SELECT PublicKey,Blocked,VerifiedEmail IS NOT NULL from USERS where UID=?",(uid,))? {
+        Ok(Some(UserSigningInfo{public_key,blocked,email_validated}))
+    } else {
+        Ok(None)
+    }
 }
 
 #[derive(Debug,Clone,Copy,Serialize,Deserialize,Eq,PartialEq)]
@@ -299,6 +346,7 @@ pub enum EmailValidationError {
     InvalidEmailAddress,
     CouldNotSendEmail,
     NoSuchUser, // unlikely to ever occur if passed signature test.
+    AlreadyValidated, // if you are trying to validate your account and you have already done so with that email.
 }
 
 impl fmt::Display for EmailValidationError {
@@ -423,6 +471,35 @@ impl EmailAddress {
         let mut conn = get_rta_database_connection().await.map_err(email_internal_error)?;
         conn.exec_drop("delete from EmailRateLimitHistory where email=?",(&self.canonicalise_for_equality_check(),)).map_err(internal_error_email)
     }
+
+
+
+}
+
+struct EmailAddressAndTimestamp {
+    email : EmailAddress,
+    timestamp : Timestamp
+}
+
+impl EmailAddressAndTimestamp {
+    const TIME_EMAIL_VALIDATION_IS_CURRENT : u64 = 1000*60*60*24;
+
+    /// If the user has a registered email address already, return it.
+    async fn get_registered_address_simple(uid:&str) -> mysql::Result<Option<Self>> {
+        let mut conn = get_rta_database_connection().await?;
+        let already_verified : Option<(Option<String>,Option<Timestamp>)> = conn.exec_first("select VerifiedEmail,VerifiedEmailTimestamp from USERS where USERS.UID=?",(uid,))?;
+        if let Some((Some(email),Some(timestamp))) = already_verified {
+            Ok(Some(EmailAddressAndTimestamp{email:EmailAddress{email},timestamp}))
+        } else {
+            Ok(None)
+        }
+    }
+    fn recent(&self) -> Result<bool,EmailValidationError> {
+        Ok(self.timestamp + Self::TIME_EMAIL_VALIDATION_IS_CURRENT > timestamp_now().map_err(internal_error_email)?)
+    }
+    fn matches(&self,email:&EmailAddress) -> bool {
+        self.email.canonicalise_for_equality_check()==email.canonicalise_for_equality_check()
+    }
 }
 
 #[derive(Debug,Clone,Serialize)]
@@ -430,6 +507,15 @@ pub struct TimesSent {
     email : String,
     /// The number of times it has been sent on a given timescale
     sent : u32,
+}
+
+#[derive(Debug,Clone,Serialize,Deserialize)]
+pub enum RequestEmailValidationResult<T:Debug+Clone> {
+    /// An email was sent to the user containing a code. The provided argument is a token that should be sent to the server along with the code from the email.
+    EmailSent(HashValue),
+    /// You have already recently validated this email, you don't have to do it again. The badge has been given to you. The argument is the bulletin board entry, or a server-signed version.
+    /// This status code is also used if you are revoking your own badge - why make that hard?
+    AlreadyValidated(Option<T>),
 }
 
 pub static EMAIL_VALIDATION_CODE_STORAGE : Lazy<Mutex<TimeLimitedHashMap<HashValue,(u32,ClientSigned<RequestEmailValidation,EmailAddress>)>>> = Lazy::new(||Mutex::new(TimeLimitedHashMap::new(Duration::from_secs(3600))));
@@ -445,17 +531,41 @@ impl RequestEmailValidation {
     /// * Store said code for use with EmailProof.
     ///
     /// Returns a hash value that can be used for EmailProof.
-    pub async fn process(sig : &ClientSigned<RequestEmailValidation,EmailAddress>) -> Result<HashValue, EmailValidationError> {
+    pub async fn process(sig : &ClientSigned<RequestEmailValidation,EmailAddress>) -> Result<RequestEmailValidationResult<HashValue>, EmailValidationError> {
         sig.signed_message.unsigned.check_is_not_in_do_not_email_list().await?;
-        let badge = RequestEmailValidation::get_badge(sig)?;
+        let registered_email = EmailAddressAndTimestamp::get_registered_address_simple(&sig.signed_message.user).await.map_err(internal_error_email)?;
         match sig.parsed.why.get_type() {
             EmailValidationType::GainBadge => {
+                let badge = RequestEmailValidation::get_badge(sig)?;
                 if badge.is_in_database_simple(&sig.signed_message.user).await.map_err(internal_error_email)? { return Err(EmailValidationError::AlreadyHaveBadge); }
+                if let Some(already_verified) = registered_email {
+                    if already_verified.matches(&sig.signed_message.unsigned)&&already_verified.recent()? {  // just give badge.
+                        return Ok(RequestEmailValidationResult::AlreadyValidated(EmailProof::successful_verification(sig).await?));
+                    }
+                }
             },
             EmailValidationType::RevokeBadge(uid) => {
+                let badge = RequestEmailValidation::get_badge(sig)?;
                 if !badge.is_in_database_simple(&uid).await.map_err(internal_error_email)? { return Err(EmailValidationError::DoesNotHaveBadgeToRevoke); }
+                /* Don't let a recently fired person revoke badges.
+                if let Some(already_verified) = registered_email {
+                    if already_verified.matches(&sig.signed_message.unsigned)&&already_verified.recent()? {  // just give badge.
+                        return Ok(RequestEmailValidationResult::AlreadyValidated(EmailProof::successful_verification(sig).await?.unwrap()));
+                    }
+                }*/
+                if uid==sig.signed_message.user { // always let a user revoke their own badge
+                    return Ok(RequestEmailValidationResult::AlreadyValidated(EmailProof::successful_verification(sig).await?));
+                }
             },
             EmailValidationType::AccountRecovery => {}
+            EmailValidationType::AccountValidation => {
+                // Could check that it is not already validated.
+                if let Some(already_verified) = registered_email {
+                    if already_verified.matches(&sig.signed_message.unsigned) {
+                        return Err(EmailValidationError::AlreadyValidated)
+                    }
+                }
+            }
         }
         let code : u32 = rand::thread_rng().gen_range(100000..1000000);
         sig.signed_message.unsigned.add_to_times_sent().await?;
@@ -487,7 +597,7 @@ impl RequestEmailValidation {
                 println!("No credentials for sending email found in config.toml. Can't send emails.")
             }
         } else {
-            println!("Consider this an email to {} with code {}. Enter email details in config.toml to actually send email",sig.signed_message.unsigned.email,code); // TODO actually send email.
+            println!("Consider this an email to {} with code {}. Enter email details in config.toml to actually send email",sig.signed_message.unsigned.email,code);
         }
         let hash = {
             let data = serde_json::ser::to_string(&sig.signed_message).unwrap();
@@ -497,7 +607,7 @@ impl RequestEmailValidation {
             HashValue(<[u8; 32]>::from(hasher.finalize()))
         };
         EMAIL_VALIDATION_CODE_STORAGE.lock().unwrap().insert(hash,(code,sig.clone()));
-        Ok(hash)
+        Ok(RequestEmailValidationResult::EmailSent(hash))
     }
 
     pub fn get_badge(sig : &ClientSigned<RequestEmailValidation,EmailAddress>) -> Result<Badge,EmailValidationError> {
@@ -520,7 +630,10 @@ impl RequestEmailValidation {
                 })
             }
             EmailValidationReason::AccountRecovery => {
-                Err(EmailValidationError::InternalError) // TODO we haven't worked out how account recovery works yet.
+                Err(EmailValidationError::InternalError) // Should not get here.
+            }
+            EmailValidationReason::AccountValidation => {
+                Err(EmailValidationError::InternalError) // Should not get here.
             }
             EmailValidationReason::RevokeMP(_uid,principal) => {
                 let mps = MPSpec::get().map_err(internal_error_email)?;
@@ -549,7 +662,8 @@ impl RequestEmailValidation {
 pub enum EmailValidationReason {
     AsMP(bool), // if argument is true, the principal. Otherwise a staffer with access to email.
     AsOrg,
-    AccountRecovery,
+    AccountValidation, // Email account validation
+    AccountRecovery, // Setting a new public key. This probably shouldn't be here, as the user will be unable to sign it.
     RevokeMP(UserUID,bool), // revoke a given UID. bool same meaning as AsMP.
     RevokeOrg(UserUID), // revoke a given UID
 }
@@ -557,7 +671,8 @@ pub enum EmailValidationReason {
 enum EmailValidationType {
     GainBadge,
     RevokeBadge(UserUID),
-    AccountRecovery
+    AccountRecovery,
+    AccountValidation,
 }
 
 impl EmailValidationReason {
@@ -565,6 +680,7 @@ impl EmailValidationReason {
         match self {
             EmailValidationReason::AsMP(_) => EmailValidationType::GainBadge,
             EmailValidationReason::AsOrg => EmailValidationType::GainBadge,
+            EmailValidationReason::AccountValidation => EmailValidationType::AccountValidation,
             EmailValidationReason::AccountRecovery => EmailValidationType::AccountRecovery,
             EmailValidationReason::RevokeMP(s, _) => EmailValidationType::RevokeBadge(s.clone()),
             EmailValidationReason::RevokeOrg(s) => EmailValidationType::RevokeBadge(s.clone()),
@@ -572,41 +688,58 @@ impl EmailValidationReason {
     }
 }
 
-/// Information to request that an email be sent asking for verification.
+/// Information to respond to an email sent with a code.
 #[derive(Debug,Clone,Serialize,Deserialize,Eq,PartialEq)]
 pub struct EmailProof {
     hash : HashValue, // value returned from RequestEmailValidation::process()
-    code : u32, // email address to be validated
+    code : u32, // the code that was sent to you in the email
 }
 
 impl EmailProof {
     /// Action the email proof. Assign the appropriate badge (or unassign as appropriate).
-    /// TODO it would be good to tell people they have been revoked, and by whom.
     pub async fn process(sig : &ClientSigned<EmailProof>) -> Result<Option<HashValue>, EmailValidationError> {
         if let Some((code,initial_request)) = EMAIL_VALIDATION_CODE_STORAGE.lock().unwrap().get(&sig.parsed.hash) {
             if initial_request.signed_message.user!=sig.signed_message.user { return Err(EmailValidationError::WrongUser)}
             if *code!=sig.parsed.code { return Err(EmailValidationError::WrongCode)}
-            let badge = RequestEmailValidation::get_badge(initial_request)?;
             // successfully verified!
-            let mut conn = get_rta_database_connection().await.map_err(internal_error_email)?;
-            let mut transaction = conn.start_transaction(TxOpts::default()).map_err(internal_error_email)?;
-            let user_id = get_user_id(&initial_request.signed_message.user,EmailValidationError::NoSuchUser,EmailValidationError::InternalError,&mut transaction)?;
-            match initial_request.parsed.why.get_type() {
-                EmailValidationType::GainBadge => {
-                    if badge.is_in_database(user_id,&mut transaction).map_err(internal_error_email)? { return Err(EmailValidationError::AlreadyHaveBadge); }
-                    badge.store_in_database(user_id,&mut transaction).map_err(internal_error_email)?
-                },
-                EmailValidationType::RevokeBadge(uid) => {
-                    let revoked_user_id = get_user_id(&uid,EmailValidationError::NoSuchUser,EmailValidationError::InternalError,&mut transaction)?;
-                    if !badge.is_in_database(revoked_user_id,&mut transaction).map_err(internal_error_email)? { return Err(EmailValidationError::DoesNotHaveBadgeToRevoke); }
-                    badge.remove_from_database(revoked_user_id,&mut transaction).map_err(internal_error_email)?
-                },
-                EmailValidationType::AccountRecovery => {} // TODO we haven't worked out how account recovery works yet.
+            Self::successful_verification(initial_request).await
+        } else { Err(EmailValidationError::NoCodeOrExpired)}
+    }
+
+    /// Call when someone has verified an email address.
+    /// TODO it would be good to tell people they have been revoked, and by whom.
+    pub async fn successful_verification(initial_request : &ClientSigned<RequestEmailValidation,EmailAddress>) -> Result<Option<HashValue>, EmailValidationError> {
+        let mut conn = get_rta_database_connection().await.map_err(internal_error_email)?;
+        let mut transaction = conn.start_transaction(TxOpts::default()).map_err(internal_error_email)?;
+        let user_id = get_user_id(&initial_request.signed_message.user,EmailValidationError::NoSuchUser,EmailValidationError::InternalError,&mut transaction)?;
+        let should_store_on_bulletin_board = match initial_request.parsed.why.get_type() {
+            EmailValidationType::GainBadge => {
+                let badge = RequestEmailValidation::get_badge(initial_request)?;
+                if badge.is_in_database(user_id,&mut transaction).map_err(internal_error_email)? { return Err(EmailValidationError::AlreadyHaveBadge); }
+                badge.store_in_database(user_id,&mut transaction).map_err(internal_error_email)?;
+                true
+            },
+            EmailValidationType::RevokeBadge(uid) => {
+                let badge = RequestEmailValidation::get_badge(initial_request)?;
+                let revoked_user_id = get_user_id(&uid,EmailValidationError::NoSuchUser,EmailValidationError::InternalError,&mut transaction)?;
+                if !badge.is_in_database(revoked_user_id,&mut transaction).map_err(internal_error_email)? { return Err(EmailValidationError::DoesNotHaveBadgeToRevoke); }
+                badge.remove_from_database(revoked_user_id,&mut transaction).map_err(internal_error_email)?;
+                true
+            },
+            EmailValidationType::AccountRecovery => {false} // TODO we haven't worked out how account recovery works yet.
+            EmailValidationType::AccountValidation => {
+                let timestamp = timestamp_now().map_err(internal_error_email)?;
+                transaction.exec_drop("update USERS set VerifiedEmail=?,VerifiedEmailTimestamp=? where id=?",(&initial_request.signed_message.unsigned.email,timestamp,user_id)).map_err(internal_error_email)?;
+                false
             }
-            transaction.commit().map_err(internal_error_email)?;
+        };
+        transaction.commit().map_err(internal_error_email)?;
+        if should_store_on_bulletin_board {
             let bb_hash = LogInBulletinBoard::EmailVerification(initial_request.signed_message.just_signed_part()).log_in_bulletin_board().await.map_err(bulletin_board_error_email)?;
             Ok(Some(bb_hash))
-        } else { Err(EmailValidationError::NoCodeOrExpired)}
+        } else {
+            Ok(None)
+        }
     }
 }
 

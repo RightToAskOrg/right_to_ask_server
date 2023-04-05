@@ -9,12 +9,13 @@ It should contain the following sections
 
 ## General configuration
 
-Some general configuration for the server goes at the top. At the moment there 
-is only one entry
+Some general configuration for the server goes at the top. These are likely to change.
 
 ```toml
 # Define the number of users' long searches that are cached. Should be O(number of users per hour)
 search_cache_size=1000
+# default false. If set to true, the user must have validated an email address to do most write operations.
+require_validated_email=false
 ```
 
 
@@ -92,7 +93,7 @@ There is an intention of (optionally) allowing other credentials such as for AWS
 
 # Unit tests for database - test_config.toml
 
-Some unit tests, when running, require a database to execute against. These us a file with the
+Some unit tests, when running, require a database to execute against. These use a file with the
 same format called test_config.toml
 
 The unit tests are normally run in the directory of the crate - the unit tests requiring test_config.toml

@@ -3,7 +3,7 @@ use actix_web::{HttpServer, middleware, web};
 use actix_web::{get, post};
 use std::path::PathBuf;
 use actix_web::web::Json;
-use right_to_ask_api::person::{NewRegistration, get_list_of_all_users, get_count_of_all_users, UserInfo, get_user_by_id, RequestEmailValidation, EmailProof, EmailAddress, EditUserDetails, MiniUserInfo, search_for_users, TimesSent};
+use right_to_ask_api::person::{NewRegistration, get_list_of_all_users, get_count_of_all_users, UserInfo, get_user_by_id, RequestEmailValidation, EmailProof, EmailAddress, EditUserDetails, MiniUserInfo, search_for_users, TimesSent, RequestEmailValidationResult, BlockUserError,BlockUserCommand};
 use merkle_tree_bulletin_board::hash::HashValue;
 use right_to_ask_api::database::{check_rta_database_version_current, find_similar_text_question, get_bulletin_board};
 use merkle_tree_bulletin_board::hash_history::{FullProof, HashInfo};
@@ -20,7 +20,7 @@ async fn new_registration(command : Json<NewRegistration>) -> Json<Result<Server
 
 #[post("/edit_user")]
 async fn edit_user(command : Json<ClientSigned<EditUserDetails>>) -> Json<Result<ServerSigned,String>> {
-    if let Err(signing_error) = command.signed_message.check_signature().await {
+    if let Err(signing_error) = command.signed_message.check_signature(false).await {
         Json(Err(signing_error.to_string()))
     } else {
         let res = EditUserDetails::edit_user(&command).await;
@@ -59,7 +59,7 @@ async fn get_similar_questions(command : Json<SimilarQuestionQuery>) -> Json<Res
 
 #[post("/new_question")]
 async fn new_question(command : Json<ClientSigned<NewQuestionCommand>>) -> Json<Result<ServerSigned,String>> {
-    if let Err(signing_error) = command.signed_message.check_signature().await {
+    if let Err(signing_error) = command.signed_message.check_signature(true).await {
         Json(Err(signing_error.to_string()))
     } else {
         let res = NewQuestionCommand::add_question(&command).await;
@@ -70,7 +70,7 @@ async fn new_question(command : Json<ClientSigned<NewQuestionCommand>>) -> Json<
 
 #[post("/edit_question")]
 async fn edit_question(command : Json<ClientSigned<EditQuestionCommand>>) -> Json<Result<ServerSigned,String>> {
-    if let Err(signing_error) = command.signed_message.check_signature().await {
+    if let Err(signing_error) = command.signed_message.check_signature(true).await {
         Json(Err(signing_error.to_string()))
     } else {
         let res = EditQuestionCommand::edit(&command).await;
@@ -81,7 +81,7 @@ async fn edit_question(command : Json<ClientSigned<EditQuestionCommand>>) -> Jso
 
 #[post("/plaintext_vote_question")]
 async fn plaintext_vote_question(command : Json<ClientSigned<PlainTextVoteOnQuestionCommand>>) -> Json<Result<(),String>> {
-    if let Err(signing_error) = command.signed_message.check_signature().await {
+    if let Err(signing_error) = command.signed_message.check_signature(true).await {
         Json(Err(signing_error.to_string()))
     } else {
         let res = PlainTextVoteOnQuestionCommand::vote(&command).await;
@@ -93,19 +93,28 @@ async fn plaintext_vote_question(command : Json<ClientSigned<PlainTextVoteOnQues
 
 
 #[post("/request_email_validation")]
-async fn request_email_validation(command : Json<ClientSigned<RequestEmailValidation,EmailAddress>>) -> Json<Result<ServerSigned,String>> {
-    if let Err(signing_error) = command.signed_message.check_signature().await {
+async fn request_email_validation(command : Json<ClientSigned<RequestEmailValidation,EmailAddress>>) -> Json<Result<RequestEmailValidationResult<ServerSigned>,String>> {
+    if let Err(signing_error) = command.signed_message.check_signature(false).await {
         Json(Err(signing_error.to_string()))
     } else {
         let res = RequestEmailValidation::process(&command).await;
-        let signed = ServerSigned::sign_string(res);
-        Json(signed)
+        Json(match res {
+            Err(e) => Err(e.to_string()),
+            Ok(RequestEmailValidationResult::EmailSent(h)) => Ok(RequestEmailValidationResult::EmailSent(h)),
+            Ok(RequestEmailValidationResult::AlreadyValidated(None)) => Ok(RequestEmailValidationResult::AlreadyValidated(None)),
+            Ok(RequestEmailValidationResult::AlreadyValidated(Some(h))) => {
+                match ServerSigned::new(&h) {
+                    Err(signing_error) => Err(signing_error.to_string()),
+                    Ok(signed) => Ok(RequestEmailValidationResult::AlreadyValidated(Some(signed)))
+                }
+            }
+        })
     }
 }
 
 #[post("/email_proof")]
 async fn email_proof(command : Json<ClientSigned<EmailProof>>) -> Json<Result<Option<ServerSigned>,String>> {
-    if let Err(signing_error) = command.signed_message.check_signature().await {
+    if let Err(signing_error) = command.signed_message.check_signature(false).await {
         Json(Err(signing_error.to_string()))
     } else {
         let res = EmailProof::process(&command).await;
@@ -210,7 +219,7 @@ async fn get_reasons_reported(query:web::Query<QueryQuestion>) -> Json<Result<Re
 
 #[post("/report_question")]
 async fn report_question(command : Json<ClientSigned<ReportQuestionCommand>>) -> Json<Result<(),String>> { // ServerSigned not () in result if want to put on bulletin board
-    if let Err(signing_error) = command.signed_message.check_signature().await {
+    if let Err(signing_error) = command.signed_message.check_signature(true).await {
         Json(Err(signing_error.to_string()))
     } else {
         let res = ReportQuestionCommand::report_question(&command).await;
@@ -231,6 +240,11 @@ async fn censor_leaf(command : Json<Censor>) -> Json<Result<(),String>> {
     Json(get_bulletin_board().await.censor_leaf(command.leaf_to_censor).map_err(|e|e.to_string()))
 }
 
+
+#[post("/moderation/block_user")]
+async fn block_user(command : Json<BlockUserCommand>)-> Json<Result<(),BlockUserError>> {
+    Json(command.apply().await)
+}
 
 #[get("/get_parentless_unpublished_hash_values")]
 async fn get_parentless_unpublished_hash_values() -> Json<Result<Vec<HashValue>,String>> {
@@ -398,6 +412,7 @@ async fn main() -> anyhow::Result<()> {
             .service(get_reasons_reported)
             .service(report_question)
             .service(censor_leaf)
+            .service(block_user)
             .service(get_parentless_unpublished_hash_values)
             .service(get_most_recent_published_root)
             .service(order_new_published_root)
