@@ -409,7 +409,7 @@ pub struct HansardLink {
 }
 
 /// A list of all hosts that can be linked to by the Hansard Link.
-const ALLOWED_HOSTS: [&'static str; 9] = ["www.aph.gov.au",
+const ALLOWED_HOSTS: [&'static str; 9] = ["aph.gov.au",
     "parliament.act.gov.au",
     "parliament.nsw.gov.au",
     "parliament.nt.gov.au",
