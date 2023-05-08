@@ -1,4 +1,5 @@
- # Right to Ask server.
+ # Ask Parliament server.
+(Formerly known as Right To Ask)
 
 ## Compiling
 
