@@ -23,6 +23,7 @@ use std::str::FromStr;
 use anyhow::anyhow;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
+use std::fmt::Display;
 use std::io::Read;
 use scraper::Selector;
 use itertools::Itertools;
@@ -288,6 +289,16 @@ fn parse_act_la(path:&Path) -> anyhow::Result<Vec<MP>> {
     Ok(mps)
 }
 
+fn warning<T,E,F>(input:Result<T,E>,empty:F) ->T
+where F:FnOnce()->T, E:Display {
+    match input {
+        Ok(res) => res,
+        Err(e) => {
+            println!("Warning : {}",e);
+            empty()
+        }
+    }
+}
 
 /// Parse WA both houses
 fn parse_wa(path:&Path,chamber:Chamber) -> anyhow::Result<Vec<MP>> {
@@ -310,7 +321,8 @@ fn parse_wa(path:&Path,chamber:Chamber) -> anyhow::Result<Vec<MP>> {
             else { roles.push(s.to_string()); }
         }
         let electorate = tds[1].text().next().ok_or_else(||anyhow!("Could not find electorate in WA html file"))?.trim();
-        let email = tds[2].text().find(|t|t.trim().trim_end_matches(".").ends_with("@mp.wa.gov.au")).ok_or_else(||anyhow!("Could not find email in WA html file"))?.trim().trim_end_matches(".").to_string(); // Jodie Hanns has an extra period at the end of her email address.
+        // Benjamin Letts Dawkins does not have an email address
+        let email = warning(tds[2].text().find(|t|t.trim().trim_end_matches(".").ends_with("@mp.wa.gov.au")).ok_or_else(||anyhow!("Could not find email in WA html file for {} {}",first_name,surname)),||"").trim().trim_end_matches(".").to_string(); // Jodie Hanns has an extra period at the end of her email address.
         let mp = MP{
             first_name,
             surname,
@@ -526,7 +538,7 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     let dir = PathBuf::from_str(MP_SOURCE)?;
 
     // NT
-    let nt_members = download_to_file("https://parliament.nt.gov.au/__data/assets/pdf_file/0004/932971/MASTER-List-of-Members-Fourteenth-Assembly-as-at-January-2023.pdf").await?;
+    let nt_members = download_to_file("https://parliament.nt.gov.au/__data/assets/pdf_file/0004/932971/MASTER-14th-Assembly-List-of-Members-March-2023.pdf").await?;
     parse_nt_la_pdf(nt_members.path())?;
     nt_members.persist(dir.join(Chamber::NT_Legislative_Assembly.to_string()+".pdf"))?;
 
