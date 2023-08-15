@@ -4,12 +4,10 @@
 use std::convert::TryFrom;
 use std::fmt::{Display, Formatter};
 use once_cell::sync::Lazy;
-use ed25519_dalek::{Keypair, PUBLIC_KEY_LENGTH, SecretKey, PublicKey, ExpandedSecretKey, Verifier};
-use ed25519_dalek::ed25519::signature::Signature;
+use ed25519_dalek::{SigningKey,Signature, VerifyingKey,Verifier,pkcs8::DecodePrivateKey};
+use ed25519_dalek::ed25519::signature::{Signer};
 use serde::{Serialize,Deserialize};
 use crate::config::CONFIG;
-use pkcs8::{PrivateKeyInfo, SubjectPublicKeyInfoRef};
-use pkcs8::der::Decode;
 use serde::de::DeserializeOwned;
 use crate::person::get_user_public_key_by_id;
 
@@ -19,31 +17,18 @@ pub fn base64_decode(s:&str)-> Result<Vec<u8>, base64::DecodeError> {
 }
 pub fn base64_encode<T: AsRef<[u8]>>(input: T) -> String { use base64::Engine; base64::engine::general_purpose::STANDARD.encode(input) }
 
-static SERVER_KEY : Lazy<Keypair>  = Lazy::new(||{
+static SERVER_KEY : Lazy<SigningKey>  = Lazy::new(||{
     let private = base64_decode(&CONFIG.signing.private).expect("Could not decode config private key base64 encoding");
-    let pkd : PrivateKeyInfo = PrivateKeyInfo::from_der(&private).expect("Could not decode private key as PKCS8");
-    // println!("{:?}",pkd);
-    let private = pkd.private_key; // TODO should check oid is { 1.3.101.112 }
-    if private.len()!=34 { panic!("Server private key should be 34 bytes, is {} bytes",private.len()) }
-    if !private.starts_with(&[4,32]) { panic!("Server private key should start with 4, 32, actually is {:?}",private) }
-    let secret = SecretKey::from_bytes(&private[2..]).expect("Could not create server secret key");
-
-    // println!("Server private key {}",hex::encode(secret.as_bytes()));
-
-    let computed_public : PublicKey = (&secret).into();
-
-    let public = base64_decode(&CONFIG.signing.public).expect("Could not decode config public key base64 encoding");
-    // let pkd : SubjectPublicKeyInfo<der::Any, BitStringRef> = SubjectPublicKeyInfo::from_der(&public).expect("Could not decode public key as SubjectPublicKeyInfo (SPKI)");
-    let pkd : SubjectPublicKeyInfoRef<'_> = SubjectPublicKeyInfoRef::from_der(&public).expect("Could not decode public key as SubjectPublicKeyInfo (SPKI)");
-    // println!("{:?}",pkd);
-    let public = pkd.subject_public_key.as_bytes().expect("Public key should be integer number of bytes"); // TODO should check oid is { 1.3.101.112 }
-    if public.len()!=PUBLIC_KEY_LENGTH { panic!("Server public key should be {} bytes, is {} bytes",PUBLIC_KEY_LENGTH,public.len()) }
-    if computed_public.as_ref() != public { panic!("Computed public key {:?} does not match config public key {:?}",computed_public.as_ref(),public)}
-    let public = PublicKey::from_bytes(public).expect("Could not create server public key");
-    Keypair{ secret, public }
+    let signing_key = SigningKey::from_pkcs8_der(&private).expect("Could not decode private key as PKCS8");
+    let public_key = base64_decode(&CONFIG.signing.public).expect("Could not decode config public key base64 encoding");
+    use pkcs8::DecodePublicKey;
+    let public_key = VerifyingKey::from_public_key_der(&public_key).expect("Could not decode config public key der encoding");
+    let computed_public_key = signing_key.verifying_key();
+    if computed_public_key.as_bytes()!=public_key.as_bytes() { panic!("Computed public key from server private key does not match supplied public key.")}
+    signing_key
 });
 
-static SERVER_PRIVATE_EXPANDED_KEY : Lazy<ExpandedSecretKey> = Lazy::new(||{ (&SERVER_KEY.secret).into() });
+// static SERVER_PRIVATE_EXPANDED_KEY : Lazy<ExpandedSecretKey> = Lazy::new(||{ (&SERVER_KEY.secret).into() });
 
 pub fn get_server_public_key_base64encoded() -> String {
     CONFIG.signing.public.clone()
@@ -51,17 +36,19 @@ pub fn get_server_public_key_base64encoded() -> String {
 }
 
 pub fn get_server_public_key_raw_hex() -> String {
-    hex::encode(SERVER_KEY.public.as_bytes())
+    hex::encode(SERVER_KEY.verifying_key().as_bytes())
     // base64::encode(SERVER_PUBLIC_KEY.as_bytes())
 }
 pub fn get_server_public_key_raw_base64() -> String {
-    base64_encode(SERVER_KEY.public.as_bytes())
+    base64_encode(SERVER_KEY.verifying_key().as_bytes())
     // base64::encode(SERVER_PUBLIC_KEY.as_bytes())
 }
 
 // standard way to sign things.
 pub fn sign_message(message : &[u8]) -> String {
-    let signature = SERVER_PRIVATE_EXPANDED_KEY.sign(message,&SERVER_KEY.public);
+    let signing_key : &SigningKey = &SERVER_KEY;
+    let signature = signing_key.sign(message);
+    // let signature = SERVER_PRIVATE_EXPANDED_KEY.sign(message,&SERVER_KEY.public);
     base64_encode(signature.to_bytes())
 }
 
@@ -134,9 +121,15 @@ impl <U> ClientSignedUnparsed<U> {
             if signing_info.blocked { return Err(SignatureCheckError::UserBlocked); }
             if CONFIG.require_validated_email && need_to_have_validated_email && !signing_info.email_validated { return Err(SignatureCheckError::UserUnregistered); }
             let public_key = base64_decode(&signing_info.public_key).map_err(|_| SignatureCheckError::InvalidPublicKeyFormat)?;
-            let public_key = PublicKey::from_bytes(&public_key).map_err(|_| SignatureCheckError::InvalidPublicKeyFormat)?;
+            if public_key.len()!=32 { return Err(SignatureCheckError::InvalidPublicKeyFormat)}
+            let mut public_key_fixed_size = [0u8;32];
+            public_key_fixed_size.copy_from_slice(&public_key);
+            let public_key = VerifyingKey::from_bytes(&public_key_fixed_size).map_err(|_| SignatureCheckError::InvalidPublicKeyFormat)?;
             let signature = base64_decode(&self.signature).map_err(|_| SignatureCheckError::InvalidSignatureFormat)?;
-            let signature = Signature::from_bytes(&signature).map_err(|_| SignatureCheckError::InvalidSignatureFormat)?;
+            if signature.len()!=64 { return Err(SignatureCheckError::InvalidSignatureFormat)}
+            let mut signature_fixed_size = [0u8;64];
+            signature_fixed_size.copy_from_slice(&signature);
+            let signature = Signature::from_bytes(&signature_fixed_size);
             public_key.verify(self.message.as_bytes(),&signature).map_err(|_| SignatureCheckError::BadSignature)
         } else { Err(SignatureCheckError::NoSuchUser) }
     }
