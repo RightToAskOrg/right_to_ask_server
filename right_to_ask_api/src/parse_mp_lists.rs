@@ -26,7 +26,6 @@ use std::convert::TryFrom;
 use std::fmt::Display;
 use std::io::Read;
 use scraper::Selector;
-use itertools::Itertools;
 use crate::parse_pdf_util::{parse_pdf_to_strings_with_same_font, extract_string};
 use regex::Regex;
 use calamine::{open_workbook, Xls, Reader, Xlsx};
@@ -75,14 +74,15 @@ fn parse_csv_getting_extra<F:Read>(file : F,chamber:Chamber,surname_heading:&str
     let mut mps = Vec::new();
     let mut extra_vec = Vec::new();
     let headings = reader.headers()?;
-    let find_heading = |name:&str|{headings.iter().position(|e|e==name)}.ok_or_else(||anyhow!("No column header {} for surname for {}",surname_heading,chamber));
-    let col_surname = find_heading(surname_heading)?;
-    let col_party = find_heading(party_heading)?;
-    let cols_firstname : Vec<usize> = first_name_heading.into_iter().map(|&s|find_heading(s)).collect::<anyhow::Result<Vec<usize>>>()?;
-    let cols_role : Vec<usize> = role_heading.into_iter().map(|&s|find_heading(s)).collect::<anyhow::Result<Vec<usize>>>()?;
-    let col_electorate : Option<usize> = electorate_heading.map(find_heading).transpose()?;
-    let col_email : Option<usize> = email_heading.map(find_heading).transpose()?;
-    let col_extra : Option<usize> = extra_heading.map(find_heading).transpose()?;
+    // println!("Headings : {:?}",headings);
+    let find_heading = |name:&str,why:&str|{headings.iter().position(|e|e==name)}.ok_or_else(||anyhow!("No column header {} for {} for {}",name,why,chamber));
+    let col_surname = find_heading(surname_heading,"surname")?;
+    let col_party = find_heading(party_heading,"party")?;
+    let cols_firstname : Vec<usize> = first_name_heading.into_iter().map(|&s|find_heading(s,"first name")).collect::<anyhow::Result<Vec<usize>>>()?;
+    let cols_role : Vec<usize> = role_heading.into_iter().map(|&s|find_heading(s,"role")).collect::<anyhow::Result<Vec<usize>>>()?;
+    let col_electorate : Option<usize> = electorate_heading.map(|n|find_heading(n,"electorate")).transpose()?;
+    let col_email : Option<usize> = email_heading.map(|n|find_heading(n,"email")).transpose()?;
+    let col_extra : Option<usize> = extra_heading.map(|n|find_heading(n,"extra")).transpose()?;
     for record in reader.records() {
         let record = record?;
         let mp = MP {
@@ -263,28 +263,41 @@ fn parse_act_la(path:&Path) -> anyhow::Result<Vec<MP>> {
     let select_td = Selector::parse("td").unwrap();
     for tr in table.select(&Selector::parse("tr").unwrap()) {
         let tds : Vec<_> = tr.select(&select_td).collect();
-        if tds.len()!=6 { return Err(anyhow!("Unexpected number of columns in ACT table"))}
-        let name = tds[0].text().next().ok_or_else(||anyhow!("Could not find name in ACT html file"))?.trim();
-        let role = tds[1].text().map(|t|t.trim()).join("; ");
-        let electorate = tds[2].text().next().ok_or_else(||anyhow!("Could not find electorate in ACT html file"))?.trim();
-        let party = tds[3].text().next().ok_or_else(||anyhow!("Could not find party in ACT html file"))?.trim();
-        let email = tds[4].text().find(|t|t.trim().ends_with("act.gov.au"));
+        if tds.len()!=4 { return Err(anyhow!("Unexpected number of columns in ACT table"))}
+        let mut first_name = String::new();
+        let mut surname = String::new();
+        let mut role = String::new();
+        for s in tds[0].text() {
+            let s = s.trim();
+            if !s.is_empty() {
+                // first line is name.
+                if first_name.is_empty() { first_name = s.to_string(); }
+                else if surname.is_empty() { surname = s.to_string(); }
+                else if role.is_empty() { role = s.to_string(); }
+                else { role.push_str("; "); role.push_str(s); }
+            }
+        }
+        if first_name.is_empty() {return Err(anyhow!("Could not find first name in ACT html file"))}
+        if surname.is_empty() {return Err(anyhow!("Could not find surname in ACT html file"))}
+//        let name = col0_iterator.next().ok_or_else(||anyhow!("Could not find name in ACT html file"))?.trim();
+//        let role = tds[1].text().map(|t|t.trim()).join("; ");
+        let electorate = tds[1].text().next().ok_or_else(||anyhow!("Could not find electorate in ACT html file"))?.trim();
+        let party = tds[2].text().next().ok_or_else(||anyhow!("Could not find party in ACT html file"))?.trim();
+        let email = tds[3].text().find(|t|t.trim().ends_with("act.gov.au"));
         if email.is_none() { // This genuinely occurs once as of June 30, 2022 for Ed Cocks.
-            println!("Warning - could not find email in ACT html file for {}", name);
+            println!("Warning - could not find email in ACT html file for {first_name} {surname}");
         }
         let email = email.unwrap_or("");
-        if let Some((surname,first_name)) = name.split_once(',') {
-            // println!("name : {} electorate {} email {} role {}",name,electorate,email,role);
-            let mp = MP{
-                first_name: first_name.trim().to_string(),
-                surname: surname.trim().to_string(),
+        //println!("name : {first_name} {surname} electorate {} email {} role {}",electorate,email,role);
+        let mp = MP{
+                first_name,
+                surname,
                 electorate: Electorate { chamber: Chamber::ACT_Legislative_Assembly, region: Some(electorate.to_string()) },
                 email: email.to_string(),
                 role,
                 party : party.to_string(),
-            };
-            mps.push(mp);
-        } else { return Err(anyhow!("Name {} does not contain a comma in ACT table",name))}
+        };
+        mps.push(mp);
     }
     Ok(mps)
 }
@@ -337,7 +350,7 @@ fn parse_wa(path:&Path,chamber:Chamber) -> anyhow::Result<Vec<MP>> {
     Ok(mps)
 }
 
-
+/* Replaced by hard coded list below
 /// Parse the list of which districts are in which electorate in Victoria.
 fn parse_vic_district_list(path:&Path) -> anyhow::Result<Vec<RegionContainingOtherRegions>> {
     let mut electorates = Vec::new();
@@ -352,6 +365,20 @@ fn parse_vic_district_list(path:&Path) -> anyhow::Result<Vec<RegionContainingOth
         }
     }
     Ok(electorates)
+}
+*/
+/// Victoria no longer has a nice list of regions I could find.
+fn hard_coded_victorian_regions() -> Vec<RegionContainingOtherRegions> {
+    vec![
+        RegionContainingOtherRegions::new("Eastern Metropolitan", &["Bayswater","Box Hill","Bulleen","Croydon","Eltham","Ferntree Gully","Forest Hill","Ivanhoe","Mount Waverley","Ringwood","Warrandyte"]),
+        RegionContainingOtherRegions::new("Southern Metropolitan", &["Albert Park","Bentleigh","Brighton","Burwood","Caulfield","Hawthorn","Kew","Malvern","Oakleigh","Prahran","Sandringham"]),
+        RegionContainingOtherRegions::new("Northern Metropolitan", &["Broadmeadows","Brunswick","Bundoora","Melbourne","Mill Park","Northcote","Pascoe Vale","Preston","Richmond","Thomastown","Yuroke"]),
+        RegionContainingOtherRegions::new("South-Eastern Metropolitan", &["Carrum","Clarinda","Cranbourne","Dandenong","Frankston","Keysborough","Mordialloc","Mulgrave","Narre Warren North","Narre Warren South","Rowville"]),
+        RegionContainingOtherRegions::new("Eastern Victoria", &["Bass","Evelyn","Gembrook","Gippsland East","Gippsland South","Hastings","Monbulk","Mornington","Morwell","Narracan","Nepean"]),
+        RegionContainingOtherRegions::new("Northern Victoria", &["Benambra","Bendigo East","Bendigo West","Eildon","Euroa","Macedon","Mildura","Murray Plains","Ovens Valley","Shepparton","Yan Yean"]),
+        RegionContainingOtherRegions::new("Western Metropolitan", &["Altona","Essendon","Footscray","Kororoit","Niddrie","St Albans","Sunbury","Sydenham","Tarneit","Werribee","Williamstown"]),
+        RegionContainingOtherRegions::new("Western Victoria", &["Bellarine","Buninyong","Geelong","Lara","Lowan","Melton","Polwarth","Ripon","South Barwon","South-West Coast","Wendouree"]),
+    ]
 }
 
 
@@ -538,15 +565,16 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     let dir = PathBuf::from_str(MP_SOURCE)?;
 
     // NT
-    let nt_members = download_to_file("https://parliament.nt.gov.au/__data/assets/pdf_file/0004/932971/MASTER-14th-Assembly-List-of-Members-March-2023.pdf").await?;
+    let nt_members = download_to_file("https://parliament.nt.gov.au/__data/assets/pdf_file/0004/1457113/MASTER-15th-Legislative-Assembly-List-of-Members-for-webpage-November-2024.pdf").await?;
     parse_nt_la_pdf(nt_members.path())?;
     nt_members.persist(dir.join(Chamber::NT_Legislative_Assembly.to_string()+".pdf"))?;
 
+/* Page no longer exists.
     // Vic list of districts in each region
     let district_list = download_to_file("https://www.parliament.vic.gov.au/component/fabrik/list/26").await?;
     parse_vic_district_list(district_list.path())?;
     district_list.persist(dir.join("VicDistrictList.html"))?;
-
+*/
     // WA
     let la = download_to_file("https://www.parliament.wa.gov.au/parliament/memblist.nsf/WebCurrentMembLA?OpenView").await?;
     parse_wa(la.path(),Chamber::WA_Legislative_Assembly)?;
@@ -556,18 +584,18 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     lc.persist(dir.join(Chamber::WA_Legislative_Council.to_string()+".html"))?;
 
     // VIC
-    let la = download_to_file("https://www.parliament.vic.gov.au/images/members/assemblymembers.csv").await?;
+    let la = download_to_file("https://povwebsiteresourcestore.blob.core.windows.net/lists/assemblymembers.csv").await?;
     parse_vic_la(la.reopen()?)?;
     la.persist(dir.join(Chamber::Vic_Legislative_Assembly.to_string()+".csv"))?;
-    let lc = download_to_file("https://www.parliament.vic.gov.au/images/members/councilmembers.csv").await?;
+    let lc = download_to_file("https://povwebsiteresourcestore.blob.core.windows.net/lists/councilmembers.csv").await?;
     parse_vic_lc(lc.reopen()?)?;
     lc.persist(dir.join(Chamber::Vic_Legislative_Council.to_string()+".csv"))?;
 
     // TAS
-    let ha = download_to_file("https://www.parliament.tas.gov.au/Members/HAMembers.xlsx").await?;
+    let ha = download_to_file("https://www.parliament.tas.gov.au/__data/assets/excel_doc/0032/74885/Mail-Merge-as-at-25-October-2024.xlsx").await?;
     parse_tas(ha.path(),Chamber::Tas_House_Of_Assembly)?;
     ha.persist(dir.join(Chamber::Tas_House_Of_Assembly.to_string()+".xlsx"))?;
-    let lc = download_to_file("https://www.parliament.tas.gov.au/members/lcMembers.xlsx").await?;
+    let lc = download_to_file("https://www.parliament.tas.gov.au/__data/assets/excel_doc/0026/14597/Housemembers.xlsx").await?;
     parse_tas(lc.path(),Chamber::Tas_Legislative_Council)?;
     lc.persist(dir.join(Chamber::Tas_Legislative_Council.to_string()+".xlsx"))?;
 
@@ -595,7 +623,7 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     let senate_pdf = download_to_file("https://www.aph.gov.au/-/media/03_Senators_and_Members/31_Senators/contacts/los.pdf").await?;
     parse_australian_senate_pdf(senate_pdf.path())?;
     senate_pdf.persist(dir.join(Chamber::Australian_Senate.to_string()+".pdf"))?;
-    let house_reps_pdf = download_to_file("https://www.aph.gov.au/-/media/03_Senators_and_Members/32_Members/Lists/Members_List_2023.pdf").await?;
+    let house_reps_pdf = download_to_file("https://www.aph.gov.au/-/media/03_Senators_and_Members/32_Members/Lists/Members_List_2024.pdf").await?;
     parse_australian_house_reps_pdf(house_reps_pdf.path(),&extract_electorates(&australian_house_reps_res)?)?;
     house_reps_pdf.persist(dir.join(Chamber::Australian_House_Of_Representatives.to_string()+".pdf"))?;
 
@@ -608,7 +636,7 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     lc.persist(dir.join(Chamber::NSW_Legislative_Council.to_string()+".csv"))?;
 
     // ACT
-    let la = download_to_file("https://www.parliament.act.gov.au/members/members-of-the-assembly").await?;
+    let la = download_to_file("https://www.parliament.act.gov.au/members/current").await?;
     parse_act_la(la.path())?;
     la.persist(dir.join(Chamber::ACT_Legislative_Assembly.to_string()+".html"))?;
 
@@ -682,7 +710,7 @@ pub fn create_mp_list() -> anyhow::Result<()> {
     }
     // Vic list of districts in each region
     println!("Processing Vic districts");
-    let vic_districts = parse_vic_district_list(&dir.join("VicDistrictList.html"))?;
+    let vic_districts = hard_coded_victorian_regions(); // parse_vic_district_list(&dir.join("VicDistrictList.html"))?;
     let spec = MPSpec { mps, federal_electorates_by_state, vic_districts };
     serde_json::to_writer(File::create(dir.join("MPs.json"))?,&spec)?;
     Ok(())

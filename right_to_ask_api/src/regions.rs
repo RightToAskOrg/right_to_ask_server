@@ -252,6 +252,15 @@ pub struct RegionContainingOtherRegions {
 	pub regions: Vec<String>,
 }
 
+impl RegionContainingOtherRegions {
+	pub fn new(super_region:&str,regions:&[&str]) -> Self {
+		RegionContainingOtherRegions{
+			super_region: super_region.to_string(),
+			regions : regions.iter().map(|s|s.to_string()).collect()
+		}
+	}
+}
+
 impl Jurisdiction {
 	/// return true if the jurisdiction is an appropriate one for a politician in a given chamber.
 	/// * If the jurisdiction is a chamber, thyey should match.
