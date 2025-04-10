@@ -159,13 +159,30 @@ struct ParseAustralianSenatePDFWork {
     history : Option<String>,
     current_name : Option<(String,String)>,
     last_was_just_email : bool,
+    partial_email : Option<String>,
     result : ParsedAustralianSenatePDF,
 }
 
 impl ParseAustralianSenatePDFWork {
+    fn add_email(&mut self,email:String) -> anyhow::Result<()> {
+        if email.len()>1000 {
+            return Err(anyhow!("Absurdly long Email {}.",email));
+        }
+        if email.ends_with("aph.gov.au") {
+            if let Some((first,surname)) = self.current_name.take() {
+          //      println!("Australian Senate First {} Surname {} email {}",first,surname,email);
+                self.result.map.entry(surname).or_insert_with(||vec![]).push((first,email))
+            } else {
+                return Err(anyhow!("Email {} without prior recognisable name.",email));
+            }
+        } else {
+            self.partial_email=Some(email);
+        }
+        Ok(())
+    }
     fn add_text(&mut self,text:String) -> anyhow::Result<()> {
         let mut text = text.trim().to_string();
-        // println!("   {}",text);
+        //println!("   {}",text);
         if let Some(pos) = text.find("Email: ") {
             if pos>0 { text=text[pos..].to_string(); }
         }
@@ -173,7 +190,10 @@ impl ParseAustralianSenatePDFWork {
             text = ", ".to_string()+&text;
             self.history=Some(self.history.take().unwrap().trim_end_matches(",").to_string())
         }
-        if text.starts_with(", Senator ") {
+        if let Some(partial) = self.partial_email.take() {
+            let email = partial+&text;
+            self.add_email(email)?;
+        } else if text.starts_with(", Senator ") {
             if let Some(surname) = self.history.take() {
                 let first = text.trim_start_matches(", Senator ").trim_start_matches("the Hon ").trim().to_string();
                 if self.current_name.is_some() { return Err(anyhow!("Haven't dealt with current name"))}
@@ -184,19 +204,14 @@ impl ParseAustralianSenatePDFWork {
             if email.is_empty() { self.last_was_just_email = true }
             else {
                 self.last_was_just_email=false;
-                if let Some((first,surname)) = self.current_name.take() {
-                    // println!("Australian Senate First {} Surname {} email {}",first,surname,email);
-                    self.result.map.entry(surname).or_insert_with(||vec![]).push((first,email))
-                } else {
-                    return Err(anyhow!("Email {} without prior recognisable name.",email));
-                }
+                self.add_email(email)?;
             }
-        } else { self.history=Some(text); }
+        } else { self.history=Some(text.trim_start_matches('*').to_string()); }
         Ok(())
     }
 }
 /// Parse the PDF file of senators containing emails. Warning - exceedingly brittle! This file feels hand edited.
-/// Return a map from electorate to email.
+/// Return a ParsedAustralianSenatePDF which maps from surname to (firstname,email).
 fn parse_australian_senate_pdf(path:&Path) -> anyhow::Result<ParsedAustralianSenatePDF> {
     let pdf = pdf::file::File::open(path)?;
     let mut tm_y : Option<f32> = None;
@@ -204,7 +219,7 @@ fn parse_australian_senate_pdf(path:&Path) -> anyhow::Result<ParsedAustralianSen
     let mut last_text_and_tm_y : Option<(String,f32)> = None;
     let mut last_font : Option<String> = None;
     let mut current_font : Option<String> = None;
-    let mut work = ParseAustralianSenatePDFWork{history:None, current_name:None, last_was_just_email:false, result:ParsedAustralianSenatePDF{ map: Default::default() } };
+    let mut work = ParseAustralianSenatePDFWork{history:None, current_name:None, last_was_just_email:false, partial_email: None, result:ParsedAustralianSenatePDF{ map: Default::default() } };
     let mut had_bt_since_last_text = false; // really BT or Tf
     for page in pdf.pages() {
         let page = page?;
@@ -321,9 +336,9 @@ fn parse_wa(path:&Path,chamber:Chamber) -> anyhow::Result<Vec<MP>> {
     let select_td = Selector::parse("td").unwrap();
     for tr in table.select(&Selector::parse("tr").unwrap()) {
         let tds : Vec<_> = tr.select(&select_td).collect();
-        if tds.len()!=3 { return Err(anyhow!("Unexpected number of columns in WA table"))}
-        let mut member = tds[0].text();
-        let first_name = member.next().ok_or_else(||anyhow!("Could not find first name in WA html file"))?.trim().trim_start_matches("Hon. ").trim_start_matches("Mr ").trim_start_matches("Ms ").trim_start_matches("Dr ").trim_start_matches("Ms ").to_string();
+        if tds.len()!=4 { return Err(anyhow!("Unexpected number of columns in WA table"))}
+        let mut member = tds[1].text();
+        let first_name = member.next().ok_or_else(||anyhow!("Could not find first name in WA html file"))?.trim().trim_start_matches("Hon. ").trim_start_matches("Hon ").trim_start_matches("HonDr ").trim().trim_start_matches("Mr ").trim_start_matches("Ms ").trim_start_matches("Dr ").trim_start_matches("Mrs ").trim().to_string();
         let surname = member.next().ok_or_else(||anyhow!("Could not find surname in WA html file"))?.trim().to_string();
         let mut party : Option<String> = None;
         let mut roles : Vec<String> = Vec::new();
@@ -333,9 +348,9 @@ fn parse_wa(path:&Path,chamber:Chamber) -> anyhow::Result<Vec<MP>> {
             else if s.starts_with("Party: ") { party=Some(s.trim_start_matches("Party: ").trim().to_string())}
             else { roles.push(s.to_string()); }
         }
-        let electorate = tds[1].text().next().ok_or_else(||anyhow!("Could not find electorate in WA html file"))?.trim();
+        let electorate = tds[2].text().next().ok_or_else(||anyhow!("Could not find electorate in WA html file"))?.trim();
         // Benjamin Letts Dawkins does not have an email address
-        let email = warning(tds[2].text().find(|t|t.trim().trim_end_matches(".").ends_with("@mp.wa.gov.au")).ok_or_else(||anyhow!("Could not find email in WA html file for {} {}",first_name,surname)),||"").trim().trim_end_matches(".").to_string(); // Jodie Hanns has an extra period at the end of her email address.
+        let email = warning(tds[3].text().find(|t|t.trim().trim_end_matches(".").ends_with("@mp.wa.gov.au")).ok_or_else(||anyhow!("Could not find email in WA html file for {} {}",first_name,surname)),||"").trim().trim_end_matches(".").to_string(); // Jodie Hanns has an extra period at the end of her email address.
         let mp = MP{
             first_name,
             surname,
@@ -344,7 +359,7 @@ fn parse_wa(path:&Path,chamber:Chamber) -> anyhow::Result<Vec<MP>> {
             role : roles.join("; "),
             party : party.ok_or_else(||anyhow!("Could not find party in WA html file"))?,
         };
-        // println!("{}",mp);
+        //println!("{}",mp);
         mps.push(mp);
     }
     Ok(mps)
@@ -388,15 +403,19 @@ fn parse_nt_la_pdf(path:&Path) -> anyhow::Result<Vec<MP>> {
     let strings = parse_pdf_to_strings_with_same_font(path)?;
     let mut history : Vec<String> = Vec::new();
     // for s in strings { println!("** {:?}",s);}
-    let surname_firstname = Regex::new(r"^\d+\.\s*([^,]+),\s*\S+\s+([^,]+),\s*MLA\s*$").unwrap(); // extract a surname and firstname
+    // let surname_firstname = Regex::new(r"^\d+\.\s*([^,]+),\s*\S+\s+([^,]+),\s*MLA\s*$").unwrap(); // extract a surname and firstname
+    let firstname_surname = Regex::new(r"^\s*\d+\.\s*(.+)\s+(\S+)\s+MLA\s*$").unwrap(); // extract a surname and firstname
     let mut found_name : Option<(String,String)> = None;
     let mut roles : Vec<String> = vec![];
     let mut electorate : Option<String> = None;
     let mut party : Option<String> = None;
     for s in strings {
-        // println!("** {}",s);
-        if let Some(cap) = surname_firstname.captures(&s) {
-            found_name=Some((cap[1].to_string(),cap[2].to_string()));
+        //println!("** {}",s);
+        if let Some(cap) = firstname_surname.captures(&s) {
+            let first_name = cap[1].to_string().trim().trim_start_matches("Hon ").trim_start_matches("Mrs ").trim_start_matches("Dr ").trim_start_matches("Mr ").trim_start_matches("Ms ").trim().to_string();
+            let second_name = cap[2].to_string();
+            //println!("Found name {} {}",first_name,second_name);
+            found_name=Some((second_name,first_name));
         } else if found_name.is_some() {
             let emails = s.split_whitespace().filter(|w|w.contains("@nt.gov.au")).map(|s|s.to_string()).collect::<Vec<_>>();
             history.push(s);
@@ -565,7 +584,7 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     let dir = PathBuf::from_str(MP_SOURCE)?;
 
     // NT
-    let nt_members = download_to_file("https://parliament.nt.gov.au/__data/assets/pdf_file/0004/1457113/MASTER-15th-Legislative-Assembly-List-of-Members-for-webpage-November-2024.pdf").await?;
+    let nt_members = download_to_file("https://parliament.nt.gov.au/__data/assets/pdf_file/0004/1457113/MASTER-15th-Legislative-Assembly-List-of-Members-for-webpage-March-2025.pdf").await?;
     parse_nt_la_pdf(nt_members.path())?;
     nt_members.persist(dir.join(Chamber::NT_Legislative_Assembly.to_string()+".pdf"))?;
 
@@ -623,9 +642,10 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     let senate_pdf = download_to_file("https://www.aph.gov.au/-/media/03_Senators_and_Members/31_Senators/contacts/los.pdf").await?;
     parse_australian_senate_pdf(senate_pdf.path())?;
     senate_pdf.persist(dir.join(Chamber::Australian_Senate.to_string()+".pdf"))?;
-    let house_reps_pdf = download_to_file("https://www.aph.gov.au/-/media/03_Senators_and_Members/32_Members/Lists/Members_List_2024.pdf").await?;
+    let house_reps_pdf = download_to_file("https://www.aph.gov.au/-/media/03_Senators_and_Members/32_Members/Lists/Members_List.pdf").await?;
     parse_australian_house_reps_pdf(house_reps_pdf.path(),&extract_electorates(&australian_house_reps_res)?)?;
     house_reps_pdf.persist(dir.join(Chamber::Australian_House_Of_Representatives.to_string()+".pdf"))?;
+    // Could update there seems to be a new easier to parse format https://www.aph.gov.au/Senators_and_Members/Parliamentarian_Search_Results?expand=1&q=&mem=1&par=-1&gen=0&ps=50&st=1
 
     // NSW
     let la = download_to_file("https://www.parliament.nsw.gov.au/_layouts/15/NSWParliament/memberlistservice.aspx?members=LA&format=Excel").await?;
@@ -659,6 +679,7 @@ pub fn create_mp_list() -> anyhow::Result<()> {
         for mp in &mut senate_from_csvs {
             senate_emails.add_email(mp)?;
         }
+        println!("Found {} in the Australian Senate",senate_from_csvs.len());
         mps.extend(senate_from_csvs);
         for mp in &mut reps_from_csvs {
             if let Some(found_email) = reps_emails.get(mp.electorate.region.as_ref().ok_or_else(||anyhow!("No electorate for house of reps"))?) {
@@ -668,45 +689,71 @@ pub fn create_mp_list() -> anyhow::Result<()> {
             }
             // mp.email = reps_emails.get(mp.electorate.region.as_ref().ok_or_else(||anyhow!("No electorate for house of reps"))?).ok_or_else(||anyhow!("No email from pdf for house of reps {} {} member for {}",mp.first_name,mp.surname,mp.electorate.region.as_ref().unwrap()))?.to_string();
         }
+        println!("Found {} in the Australian House of Representatives",reps_from_csvs.len());
         mps.extend(reps_from_csvs);
         federal_electorates_by_state
     };
     { // Deal with Assembly of the ACT
         println!("Processing ACT");
-        mps.extend(parse_act_la(&dir.join(Chamber::ACT_Legislative_Assembly.to_string()+".html"))?);
+        let found = parse_act_la(&dir.join(Chamber::ACT_Legislative_Assembly.to_string()+".html"))?;
+        println!("Found {} in the ACT Legislative Assembly",found.len());
     }
     { // Deal with NSW
         println!("Processing NSW");
-        mps.extend(parse_nsw_la(File::open(dir.join(Chamber::NSW_Legislative_Assembly.to_string()+".csv"))?)?);
-        mps.extend(parse_nsw_lc(File::open(dir.join(Chamber::NSW_Legislative_Council.to_string()+".csv"))?)?);
+        let found =parse_nsw_la(File::open(dir.join(Chamber::NSW_Legislative_Assembly.to_string()+".csv"))?)?;
+        println!("Found {} in the NSW Legislative Assembly",found.len());
+        mps.extend(found);
+        let found=parse_nsw_lc(File::open(dir.join(Chamber::NSW_Legislative_Council.to_string()+".csv"))?)?;
+        println!("Found {} in the NSW Legislative Council",found.len());
+        mps.extend(found);
     }
     { // Deal with NT
         println!("Processing NT");
-        mps.extend(parse_nt_la_pdf(&dir.join(Chamber::NT_Legislative_Assembly.to_string()+".pdf"))?);
+        let found=parse_nt_la_pdf(&dir.join(Chamber::NT_Legislative_Assembly.to_string()+".pdf"))?;
+        println!("Found {} in the NT Legislative Assembly",found.len());
+        mps.extend(found);
     }
     { // Deal with QLD
         println!("Processing Qld");
-        mps.extend(parse_qld_parliament(&dir.join(Chamber::Qld_Legislative_Assembly.to_string()+".xls"))?);
+        let found = parse_qld_parliament(&dir.join(Chamber::Qld_Legislative_Assembly.to_string()+".xls"))?;
+        println!("Found {} in the Queensland Legislative Assembly",found.len());
+        mps.extend(found);
     }
     { // Deal with SA
         println!("Processing SA");
-        mps.extend(parse_sa(File::open(dir.join(Chamber::SA_Legislative_Council.to_string()+".json"))?,Chamber::SA_Legislative_Council)?);
-        mps.extend(parse_sa(File::open(dir.join(Chamber::SA_House_Of_Assembly.to_string()+".json"))?, Chamber::SA_House_Of_Assembly)?);
+        let found = parse_sa(File::open(dir.join(Chamber::SA_Legislative_Council.to_string()+".json"))?,Chamber::SA_Legislative_Council)?;
+        println!("Found {} in the SA Legislative Council",found.len());
+        mps.extend(found);
+        let found =parse_sa(File::open(dir.join(Chamber::SA_House_Of_Assembly.to_string()+".json"))?, Chamber::SA_House_Of_Assembly)?;
+        println!("Found {} in the SA Legislative Assembly",found.len());
+        mps.extend(found);
     }
     { // Deal with TAS
         println!("Processing Tas");
-        mps.extend(parse_tas(&dir.join(Chamber::Tas_House_Of_Assembly.to_string()+".xlsx"),Chamber::Tas_House_Of_Assembly)?);
-        mps.extend(parse_tas(&dir.join(Chamber::Tas_Legislative_Council.to_string()+".xlsx"),Chamber::Tas_Legislative_Council)?);
+        let found = parse_tas(&dir.join(Chamber::Tas_House_Of_Assembly.to_string()+".xlsx"),Chamber::Tas_House_Of_Assembly)?;
+        println!("Found {} in the Tas House of Assembly",found.len());
+        mps.extend(found);
+        let found = parse_tas(&dir.join(Chamber::Tas_Legislative_Council.to_string()+".xlsx"),Chamber::Tas_Legislative_Council)?;
+        println!("Found {} in the Tas Legislative Council",found.len());
+        mps.extend(found);
     }
     { // Deal with VIC
         println!("Processing Vic");
-        mps.extend(parse_vic_la(File::open(dir.join(Chamber::Vic_Legislative_Assembly.to_string()+".csv"))?)?);
-        mps.extend(parse_vic_lc(File::open(dir.join(Chamber::Vic_Legislative_Council.to_string()+".csv"))?)?);
+        let found = parse_vic_la(File::open(dir.join(Chamber::Vic_Legislative_Assembly.to_string()+".csv"))?)?;
+        println!("Found {} in the Vic Legislative Assembly",found.len());
+        mps.extend(found);
+        let found = parse_vic_lc(File::open(dir.join(Chamber::Vic_Legislative_Council.to_string()+".csv"))?)?;
+        println!("Found {} in the Vic Legislative Council",found.len());
+        mps.extend(found);
     }
     { // Deal with WA
         println!("Processing WA");
-        mps.extend(parse_wa(&dir.join(Chamber::WA_Legislative_Assembly.to_string()+".html"),Chamber::WA_Legislative_Assembly)?);
-        mps.extend(parse_wa(&dir.join(Chamber::WA_Legislative_Council.to_string()+".html"),Chamber::WA_Legislative_Council)?);
+        let found = parse_wa(&dir.join(Chamber::WA_Legislative_Assembly.to_string()+".html"),Chamber::WA_Legislative_Assembly)?;
+        println!("Found {} in the WA Legislative Assembly",found.len());
+        mps.extend(found);
+        let found = parse_wa(&dir.join(Chamber::WA_Legislative_Council.to_string()+".html"),Chamber::WA_Legislative_Council)?;
+        println!("Found {} in the WA Legislative Council",found.len());
+        mps.extend(found);
     }
     // Vic list of districts in each region
     println!("Processing Vic districts");
