@@ -39,7 +39,7 @@ fn parse_australian_senate(file : File) -> anyhow::Result<Vec<MP>> {
     parse_csv(transcoded, Chamber::Australian_Senate, "Surname", &["Preferred Name", "First Name"], None, Some("State"), &["Parliamentary Titles"],"Political Party")
 }
 fn parse_australian_house_reps(file : File) -> anyhow::Result<(Vec<MP>,Vec<RegionContainingOtherRegions>)> {
-    let (mps,states) = parse_csv_getting_extra(file, Chamber::Australian_House_Of_Representatives, "Surname", &["Preferred Name", "First Name"], None, Some("Electorate"), &["Parliamentary Title", "Ministerial Title"],"Political Party",Some("State"))?;
+    let (mps,states) = parse_csv_getting_extra(file, Chamber::Australian_House_Of_Representatives, "Family name", &["Preferred name", "First name"], None, Some("Electorate"), &["Parliamentary Title", "Ministerial Title"],"Political Party",Some("State"))?;
     let mut regions_per_state : HashMap<State,Vec<String>> = HashMap::new();
     for i in 0..mps.len() {
         let state : State = State::try_from(states[i].as_str())?;
@@ -113,16 +113,20 @@ fn parse_australian_house_reps_pdf(path:&Path, electorates:&HashSet<String>) -> 
         let page = page?;
         if let Some(content) = &page.contents {
             for op in &content.operations {
-                //println!("{}",op.to_string());
-                if op.operator=="TJ" {
+                // println!("{}",op.to_string());
+                if op.operator=="TJ" || op.operator=="Tj" {
                     let text= extract_string(op);
                     if text.starts_with("Email: ") {
                         let email = text[7..].to_string();
                         if history.len()<3 { return Err(anyhow!("Email {} without prior recognisable electorate.",email)) }
-                        let mut electorate = history[history.len()-3].to_owned();
-                        if history.len()>=4 && history[history.len()-4].ends_with(' ') && !history[history.len()-4].starts_with(',') && !electorates.contains(electorate.trim_end_matches(',')) {
-                            electorate=history[history.len()-4].to_owned()+&electorate;
-                        }
+                        let electorate = if let Some(electorate) = history.iter().rev().find(|s|electorates.contains(s.trim().trim_end_matches(','))) { electorate.trim().to_string() } else {
+                            // anyhow::bail!("Could not find electorate for {}",email);
+                            let mut electorate = history[history.len()-3].trim().to_owned();
+                            if history.len()>=4 && history[history.len()-4].ends_with(' ') && !history[history.len()-4].starts_with(',') && !electorates.contains(electorate.trim_end_matches(',')) {
+                                electorate=history[history.len()-4].to_owned()+&electorate;
+                            }
+                            electorate
+                        };
                         if !electorate.ends_with(",") { return Err(anyhow!("Electorate {} not ending in comma.",electorate)) }
                         let electorate = electorate.trim_end_matches(',').to_string();
                         // println!("Electorate {} email {}",electorate,email);
@@ -557,13 +561,14 @@ fn parse_tas(path:&Path,chamber:Chamber) -> anyhow::Result<Vec<MP>> {
                     party: cell(col_party)?,
                 };
                 if empty_electorate {
+                    if mp.first_name.is_empty() && mp.surname.is_empty() && mp.email.is_empty() { continue; } // ignore blank lines
                     if let Some(last) = mps.last_mut() {
                         if last.surname==mp.surname && last.first_name==mp.first_name {// just additional role
                             last.role=if last.role.is_empty() { mp.role } else { last.role.to_string()+"; "+&mp.role};
                         } else { return Err(anyhow!("Empty electorate for TAS with different prior person.")); }
                     } else { return Err(anyhow!("Empty electorate for TAS as first entry.")); }
                 } else {
-                    //println!("{}",mp);
+                    // println!("{}",mp);
                     mps.push(mp);
                 }
             }
@@ -610,13 +615,14 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     parse_vic_lc(lc.reopen()?)?;
     lc.persist(dir.join(Chamber::Vic_Legislative_Council.to_string()+".csv"))?;
 
-    // TAS
-    let ha = download_to_file("https://www.parliament.tas.gov.au/__data/assets/excel_doc/0032/74885/Mail-Merge-as-at-25-October-2024.xlsx").await?;
+    // TAS https://www.parliament.tas.gov.au/__data/assets/excel_doc/0026/14597/Housemembers.xlsx
+    let ha = download_to_file("https://www.parliament.tas.gov.au/__data/assets/excel_doc/0026/14597/Housemembers.xlsx").await?;
     parse_tas(ha.path(),Chamber::Tas_House_Of_Assembly)?;
     ha.persist(dir.join(Chamber::Tas_House_Of_Assembly.to_string()+".xlsx"))?;
-    let lc = download_to_file("https://www.parliament.tas.gov.au/__data/assets/excel_doc/0026/14597/Housemembers.xlsx").await?;
-    parse_tas(lc.path(),Chamber::Tas_Legislative_Council)?;
-    lc.persist(dir.join(Chamber::Tas_Legislative_Council.to_string()+".xlsx"))?;
+//  TODO the link on the current tas parliament website is broken. Hopefully it will be fixed soon.
+    //    let lc = download_to_file("https://www.parliament.tas.gov.au/__data/assets/excel_doc/0032/74885/Mail-Merge-as-at-25-October-2024.xlsx").await?;
+//    parse_tas(lc.path(),Chamber::Tas_Legislative_Council)?;
+//    lc.persist(dir.join(Chamber::Tas_Legislative_Council.to_string()+".xlsx"))?;
 
     // SA
     let ha = download_to_file("https://contact-details-api.parliament.sa.gov.au/api/HAMembersDetails").await?;
