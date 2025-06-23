@@ -39,7 +39,7 @@ fn parse_australian_senate(file : File) -> anyhow::Result<Vec<MP>> {
     parse_csv(transcoded, Chamber::Australian_Senate, "Surname", &["Preferred Name", "First Name"], None, Some("State"), &["Parliamentary Titles"],"Political Party")
 }
 fn parse_australian_house_reps(file : File) -> anyhow::Result<(Vec<MP>,Vec<RegionContainingOtherRegions>)> {
-    let (mps,states) = parse_csv_getting_extra(file, Chamber::Australian_House_Of_Representatives, "Family name", &["Preferred name", "First name"], None, Some("Electorate"), &["Parliamentary Title", "Ministerial Title"],"Political Party",Some("State"))?;
+    let (mps,states) = parse_csv_getting_extra(file, Chamber::Australian_House_Of_Representatives, "Surname", &["Preferred Name", "First Name"], None, Some("Electorate"), &["Parliamentary Title", "Ministerial Title"],"Political Party",Some("State"))?;
     let mut regions_per_state : HashMap<State,Vec<String>> = HashMap::new();
     for i in 0..mps.len() {
         let state : State = State::try_from(states[i].as_str())?;
@@ -537,6 +537,11 @@ fn parse_sa(file:File,chamber:Chamber) -> anyhow::Result<Vec<MP>> {
 
 fn parse_tas(path:&Path,chamber:Chamber) -> anyhow::Result<Vec<MP>> {
     let mut mps : Vec<MP> = Vec::new();
+    // First and last names of MPs for whom we encountered a blank electorate not yet resolved by a
+    // subsequent row.
+    let mut missing_electorates : HashSet<(String, String)> = HashSet::new();
+    // First and last names of MPs for whom we have found an electorate.
+    let mut found_electorates : HashSet<(String, String)> = HashSet::new();
     let mut doc : Xlsx<_> = open_workbook(path)?;
     for (_,sheet) in &doc.worksheets() {
         let mut iter = sheet.rows();
@@ -550,7 +555,13 @@ fn parse_tas(path:&Path,chamber:Chamber) -> anyhow::Result<Vec<MP>> {
             let col_party = hcol("party")?;
             for row in iter {
                 let cell = |col:usize| row.get(col).ok_or_else(||anyhow!("Missing data in column {} for TAS",col)).map(|v|v.to_string());
-                let electorate = cell(col_electorate)?.trim().trim_start_matches("Member for ").to_string();
+                let electorate = match chamber {
+                    // The LC Spreadsheet says "member for"; the Assembly spreadsheet doesn't.
+                    Chamber::Tas_House_Of_Assembly => cell(col_electorate)?.trim().to_string(),
+                    Chamber::Tas_Legislative_Council => cell(col_electorate)?.trim().trim_start_matches("Member for ").to_string(),
+                    // This shouldn't be called with non-Tas chambers - should probably throw an error here.
+                    _ => String::from("")
+                };
                 let empty_electorate = electorate.is_empty();
                 let mp = MP{
                     first_name: cell(col_first)?,
@@ -561,16 +572,31 @@ fn parse_tas(path:&Path,chamber:Chamber) -> anyhow::Result<Vec<MP>> {
                     party: cell(col_party)?,
                 };
                 if empty_electorate {
+                    // Unfortunately there seems to be no guarantee that the empty electorates come first,
+                    // so we keep a map of the ones in which we've encountered a blank without previously
+                    // finding a known electorate, and complain if _all_ the electorates
+                    // for that name are empty. 
                     if mp.first_name.is_empty() && mp.surname.is_empty() && mp.email.is_empty() { continue; } // ignore blank lines
-                    if let Some(last) = mps.last_mut() {
-                        if last.surname==mp.surname && last.first_name==mp.first_name {// just additional role
-                            last.role=if last.role.is_empty() { mp.role } else { last.role.to_string()+"; "+&mp.role};
-                        } else { return Err(anyhow!("Empty electorate for TAS with different prior person.")); }
-                    } else { return Err(anyhow!("Empty electorate for TAS as first entry.")); }
+                    
+                    if !found_electorates.contains(&(mp.first_name.clone(), mp.surname.clone())) {
+                        // We haven't already found an electorate for this MP
+                        // TODO check what happens when insert repeats a value.
+                        missing_electorates.insert((mp.first_name.clone(), mp.surname.clone()));
+                    }
+                    // if let Some(last) = mps.last_mut() {
+                    //     if last.surname==mp.surname && last.first_name==mp.first_name {// just additional role
+                    //         last.role=if last.role.is_empty() { mp.role } else { last.role.to_string()+"; "+&mp.role};
+                    //     } else { return Err(anyhow!("Empty electorate for TAS with different prior person.")); }
+                    // } else { return Err(anyhow!("Empty electorate for TAS as first entry.")); }
                 } else {
                     // println!("{}",mp);
+                    found_electorates.insert((mp.first_name.clone(), mp.surname.clone()));
+                    missing_electorates.remove(&(mp.first_name.clone(), mp.surname.clone()));
                     mps.push(mp);
                 }
+            }
+            if !missing_electorates.is_empty() {
+                return Err(anyhow!("Missing electorates in TAS csv for MPs: {}", missing_electorates.iter().map(|(firstname, surname)| firstname.clone() + " " + surname).collect::<Vec<_>>().join(", ")));
             }
         }
     }
@@ -589,9 +615,11 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     let dir = PathBuf::from_str(MP_SOURCE)?;
 
     // NT
+    /* FIXME Comment out for now because not working.
     let nt_members = download_to_file("https://parliament.nt.gov.au/__data/assets/pdf_file/0004/1457113/MASTER-15th-Legislative-Assembly-List-of-Members-for-webpage-March-2025.pdf").await?;
     parse_nt_la_pdf(nt_members.path())?;
     nt_members.persist(dir.join(Chamber::NT_Legislative_Assembly.to_string()+".pdf"))?;
+    */
 
 /* Page no longer exists.
     // Vic list of districts in each region
@@ -619,10 +647,9 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     let ha = download_to_file("https://www.parliament.tas.gov.au/__data/assets/excel_doc/0026/14597/Housemembers.xlsx").await?;
     parse_tas(ha.path(),Chamber::Tas_House_Of_Assembly)?;
     ha.persist(dir.join(Chamber::Tas_House_Of_Assembly.to_string()+".xlsx"))?;
-//  TODO the link on the current tas parliament website is broken. Hopefully it will be fixed soon.
-    //    let lc = download_to_file("https://www.parliament.tas.gov.au/__data/assets/excel_doc/0032/74885/Mail-Merge-as-at-25-October-2024.xlsx").await?;
-//    parse_tas(lc.path(),Chamber::Tas_Legislative_Council)?;
-//    lc.persist(dir.join(Chamber::Tas_Legislative_Council.to_string()+".xlsx"))?;
+    let lc = download_to_file("https://www.parliament.tas.gov.au/__data/assets/excel_doc/0015/94002/Mail-Merge-as-at-3-June-2025.xlsx").await?;
+    parse_tas(lc.path(),Chamber::Tas_Legislative_Council)?;
+    lc.persist(dir.join(Chamber::Tas_Legislative_Council.to_string()+".xlsx"))?;
 
     // SA
     let ha = download_to_file("https://contact-details-api.parliament.sa.gov.au/api/HAMembersDetails").await?;
@@ -714,10 +741,14 @@ pub fn create_mp_list() -> anyhow::Result<()> {
         mps.extend(found);
     }
     { // Deal with NT
+        println!("NT Processing commented out for now.");
+        /*
         println!("Processing NT");
+        FIXME - commented out because file not downloading.
         let found=parse_nt_la_pdf(&dir.join(Chamber::NT_Legislative_Assembly.to_string()+".pdf"))?;
         println!("Found {} in the NT Legislative Assembly",found.len());
         mps.extend(found);
+        */
     }
     { // Deal with QLD
         println!("Processing Qld");
