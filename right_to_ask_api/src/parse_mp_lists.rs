@@ -30,7 +30,8 @@ use crate::parse_pdf_util::{parse_pdf_to_strings_with_same_font, extract_string}
 use regex::Regex;
 use calamine::{open_workbook, Xls, Reader, Xlsx};
 use encoding_rs_io::DecodeReaderBytesBuilder;
-use crate::parse_util::download_to_file;
+use tempfile::NamedTempFile;
+use crate::parse_util::{download_to_file, download_wiki_data_to_file};
 
 pub const MP_SOURCE : &'static str = "data/MP_source";
 
@@ -607,7 +608,37 @@ fn extract_electorates(mps : &[MP]) -> anyhow::Result<HashSet<String>> {
     mps.iter().map(|mp|mp.electorate.region.as_ref().map(|s|s.to_string()).ok_or_else(||anyhow!("Missing electorate"))).collect()
 }
 
-
+async fn get_house_reps_json() -> anyhow::Result<NamedTempFile> {
+   let client = reqwest::Client::new();
+   let queryString = concat!(
+        // "#Current members of the Australian House of Representatives with electorate, party, picture and date they assumed office\n" ,
+        "SELECT ?mp ?mpLabel ?districtLabel ?partyLabel ?assumedOffice (sample(?image) as ?image) where {\n" ,
+        "  # Get all mps\n" ,
+        "  ?mp p:P39 ?posheld; # With position held\n" ,
+        "           p:P102 ?partystatement. # And with a certain party\n" ,
+        "\n" ,
+        "  # Get the party\n" ,
+        "  ?partystatement ps:P102 ?party.\n" ,
+        "  MINUS { ?partystatement pq:P582 ?partyEnd. } # but minus the ones the mp is no longer a member of\n" ,
+        "  MINUS { ?party wdt:P361 ?partOf. } # and the 'Minnesota Democratic–Farmer–Labor Party' and such\n" ,
+        "\n" ,
+        "  # Check on the position in the senate\n" ,
+        "  ?posheld ps:P39 wd:Q18912794; # Position held is in the Australian house of reps\n" ,
+        "           pq:P768 ?district;\n" ,
+        "           pq:P580 ?assumedOffice. # And should have a starttime\n" ,
+        "\n" ,
+        "  MINUS { ?posheld pq:P582 ?endTime. } # But not an endtime\n" ,
+        "\n" ,
+        "  # Add an image\n" ,
+        "  OPTIONAL { ?mp wdt:P18 ?image. }\n" ,
+        "\n" ,
+        "  SERVICE wikibase:label { bd:serviceParam wikibase:language \"[AUTO_LANGUAGE],mul,en\". }\n" ,
+        "} GROUP BY ?mp ?mpLabel ?districtLabel ?partyLabel ?assumedOffice ORDER BY ?mpLabel",
+        // " &format=json"
+        );
+    let file :NamedTempFile = download_wiki_data_to_file(&*queryString, client).await?;
+    Ok(file)
+}
 
 /// Download, check, and if valid replace the downloaded files with MP lists. First of the two stages for generating MPs.json
 pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
@@ -679,6 +710,9 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     parse_australian_house_reps_pdf(house_reps_pdf.path(),&extract_electorates(&australian_house_reps_res)?)?;
     house_reps_pdf.persist(dir.join(Chamber::Australian_House_Of_Representatives.to_string()+".pdf"))?;
     // Could update there seems to be a new easier to parse format https://www.aph.gov.au/Senators_and_Members/Parliamentarian_Search_Results?expand=1&q=&mem=1&par=-1&gen=0&ps=50&st=1
+    // Attempt to get pictures from Wikipedia
+    let wiki_json:NamedTempFile = get_house_reps_json().await?;
+    wiki_json.persist(dir.join("wiki.json"))?;
 
     // NSW
     let la = download_to_file("https://www.parliament.nsw.gov.au/_layouts/15/NSWParliament/memberlistservice.aspx?members=LA&format=Excel").await?;
@@ -696,8 +730,6 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     Ok(())
 
 }
-
-
 
 /// Create "data/MP_source/MPs.json" from the source files downloaded by update_mp_list_of_files(). Second of the two stages for generating MPs.json
 pub fn create_mp_list() -> anyhow::Result<()> {
