@@ -3,6 +3,7 @@
 use std::fs::File;
 use std::io::Write;
 use anyhow::anyhow;
+use regex::Regex;
 use reqwest::Client;
 use tempfile::NamedTempFile;
 use reqwest::header::{HeaderMap, ACCEPT, USER_AGENT, CONTENT_TYPE};
@@ -53,7 +54,10 @@ pub async  fn parse_wiki_data(file: File) -> anyhow::Result<Vec<(String, String,
     println!("Got data from file: {}", raw.to_string());
     let raw = raw.get("results").unwrap().get("bindings").and_then(|v|v.as_array()).ok_or_else(||anyhow!("Can't parse wiki data json."))?;
     for mp in raw {
-       let id = mp.get("mp").unwrap().get("value").expect("Can't find mp ID in json").as_str().unwrap();
+       let id_url = mp.get("mp").unwrap().get("value").expect("Can't find mp ID in json").as_str().unwrap();
+       let base_url_regexp = Regex::new(r"http://www.wikidata.org/entity/(?<QID>\w+)").unwrap();
+       let id = &base_url_regexp.captures(id_url).unwrap()["QID"]; // .get(0).unwrap().as_str();
+       println!("Got ID {}", id);
        let district = mp.get("districtLabel").unwrap().get("value").expect("Can't find mp's district in json").as_str().unwrap();
        let name = mp.get("mpLabel").unwrap().get("value").expect("Can't find mp's name in json").as_str().unwrap();
        let img = mp.get("image");
@@ -62,7 +66,7 @@ pub async  fn parse_wiki_data(file: File) -> anyhow::Result<Vec<(String, String,
             None => ""
        };
        println!("Found MP id = {id}, name = {name}, district = {district} img = {img}", id=id, name=name, img=img);
-        mps_data.push((id.to_string(), name.to_string(), district.to_string(), img.to_string()));
+       mps_data.push((id.to_string(), name.to_string(), district.to_string(), img.to_string()));
     }
     Ok(mps_data)
 }
