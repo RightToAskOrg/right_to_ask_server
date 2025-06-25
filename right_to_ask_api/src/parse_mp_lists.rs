@@ -719,7 +719,7 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     let wiki_data_file = get_house_reps_json(client).await?;
     wiki_data_file.persist(dir.join("wiki.json"))?;
     println!("Persisted wiki data file");
-    get_photos_and_summaries(dir.join("wiki.json").to_str().unwrap(), client).await?;
+    get_photos_and_summaries(dir.join("wiki.json").to_str().unwrap()).await?;
 
     // NSW
     let la = download_to_file("https://www.parliament.nsw.gov.au/_layouts/15/NSWParliament/memberlistservice.aspx?members=LA&format=Excel").await?;
@@ -740,7 +740,7 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
 
 /// Currently only gets photos
 /// Returns name, district, summary and optional path/filename for downloaded picture.
-async fn get_photos_and_summaries(json_file : &str, client: reqwest::Client) -> anyhow::Result<Vec<(String,String, String, Option<String>)>> {
+async fn get_photos_and_summaries(json_file : &str) -> anyhow::Result<Vec<(String,String, String, Option<String>)>> {
     println!("Getting photos and summaries - got json file {}", json_file);
     let found : Vec<(String, String, String, Option<String>)> = parse_wiki_data(File::open(json_file).unwrap()).await.unwrap();
     println!("Returned from summaries: {} {} {}", found[0].0, found[0].1, found[0].2);
@@ -764,10 +764,12 @@ async fn get_photos_and_summaries(json_file : &str, client: reqwest::Client) -> 
             Some(url) => {
                 let tempfile = download_to_file(url.as_str()).await?;
                 // TODO - get right extn.
-                let filepath = format!("{}/{}.{}", path, name_no_whitespace, extn)?;
-                tempfile.persist(filepath)?;
-                results.push((name, district, summary.to_string(), Some(filepath.to_str().unwrap().to_string())));
-                
+                let extn_regexp = Regex::new(r".(?<extn>\w+)$").unwrap();
+                let extn = &extn_regexp.captures(url.as_str()).unwrap()["extn"].to_string();
+                println!("Got image {} with extension {}", url, &extn);
+                let filepath = format!("{}/{}.{}", path, name.replace(" ", "_"), extn);
+                tempfile.persist(&filepath)?;
+                results.push((name, district, summary.to_string(), Some(filepath)));
             },
             None => results.push((name, district, summary.to_string(), None))
         }
@@ -780,7 +782,7 @@ async fn get_photos_and_summaries(json_file : &str, client: reqwest::Client) -> 
         println!("Found MP ID {id}")
     }
      */
-    Ok(ids)
+    Ok(results)
 }
 
 /// Create "data/MP_source/MPs.json" from the source files downloaded by update_mp_list_of_files(). Second of the two stages for generating MPs.json
