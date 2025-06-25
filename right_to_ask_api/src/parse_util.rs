@@ -3,6 +3,7 @@
 use std::fs::File;
 use std::io::Write;
 use anyhow::anyhow;
+use itertools::Itertools;
 use regex::Regex;
 use reqwest::Client;
 use tempfile::NamedTempFile;
@@ -46,10 +47,10 @@ pub(crate) async fn download_wiki_data_to_file(query:&str, client: Client) -> an
     Ok(file)
 }
 
-/// Read the json data stored in file; return a tuple of ID, Name, district, and image url
+/// Read the json data stored in file; return a tuple of Name, district, ID, and image url
 /// TODO: a struct might be better for this.
-pub async  fn parse_wiki_data(file: File) -> anyhow::Result<Vec<(String, String, String, String)>> {
-    let mut mps_data : Vec<(String, String, String, String)> = Vec::new();
+pub async  fn parse_wiki_data(file: File) -> anyhow::Result<Vec<(String, String, String, Option<String>)>> {
+    let mut mps_data : Vec<(String, String, String, Option<String>)> = Vec::new();
     let raw : serde_json::Value = serde_json::from_reader(file)?;
     println!("Got data from file: {}", raw.to_string());
     let raw = raw.get("results").unwrap().get("bindings").and_then(|v|v.as_array()).ok_or_else(||anyhow!("Can't parse wiki data json."))?;
@@ -61,12 +62,12 @@ pub async  fn parse_wiki_data(file: File) -> anyhow::Result<Vec<(String, String,
        let district = mp.get("districtLabel").unwrap().get("value").expect("Can't find mp's district in json").as_str().unwrap();
        let name = mp.get("mpLabel").unwrap().get("value").expect("Can't find mp's name in json").as_str().unwrap();
        let img = mp.get("image");
-        let img = match img {
-            Some(img) => img.get("value").expect("Can't find mp's name in json").as_str().unwrap(),
-            None => ""
+       let img: Option<String> = match img {
+            Some(img) => Some(img.get("value").expect("Can't find mp's name in json").as_str().unwrap().to_string()),
+            None => None 
        };
-       println!("Found MP id = {id}, name = {name}, district = {district} img = {img}", id=id, name=name, img=img);
-       mps_data.push((id.to_string(), name.to_string(), district.to_string(), img.to_string()));
+       println!("Found MP id = {id}, name = {name}, district = {district}", id=id, name=name);
+       mps_data.push((name.to_string(), district.to_string(), id.to_string(), img));
     }
     Ok(mps_data)
 }
