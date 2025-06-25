@@ -49,7 +49,6 @@ pub(crate) async fn download_wiki_data_to_file(query:&str, client: Client) -> an
 /// TODO: a struct might be better for this.
 pub async  fn parse_wiki_data(file: File) -> anyhow::Result<Vec<(String, String, String, String)>> {
     let mut mps_data : Vec<(String, String, String, String)> = Vec::new();
-    mps_data.push(("This".to_string(), "is".to_string(), "a".to_string(), "test".to_string()));
     let raw : serde_json::Value = serde_json::from_reader(file)?;
     println!("Got data from file: {}", raw.to_string());
     let raw = raw.get("results").unwrap().get("bindings").and_then(|v|v.as_array()).ok_or_else(||anyhow!("Can't parse wiki data json."))?;
@@ -63,6 +62,7 @@ pub async  fn parse_wiki_data(file: File) -> anyhow::Result<Vec<(String, String,
             None => ""
        };
        println!("Found MP id = {id}, name = {name}, district = {district} img = {img}", id=id, name=name, img=img);
+        mps_data.push((id.to_string(), name.to_string(), district.to_string(), img.to_string()));
     }
     Ok(mps_data)
 }
