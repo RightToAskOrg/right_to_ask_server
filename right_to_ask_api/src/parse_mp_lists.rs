@@ -741,7 +741,7 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
 async fn get_photos_and_summaries(json_file : &str) -> anyhow::Result<Vec<String>> {
     println!("Getting photos and summaries - got json file {}", json_file);
     let found : Vec<(String, String, String, String)> = parse_wiki_data(File::open(json_file).unwrap()).await.unwrap();
-    println!("Returned from summaries: {} {} {} {}", found[0].0, found[0].1, found[1].0, found[1].1);
+    println!("Returned from summaries: {} {} {} {}", found[0].0, found[0].1, found[0].2, found[0].3);
     // let mut ids = wikidata_IDs.as_array().unwrap();
     let mut ids = Vec::new();
     /*

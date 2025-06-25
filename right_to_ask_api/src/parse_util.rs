@@ -6,6 +6,7 @@ use anyhow::anyhow;
 use reqwest::Client;
 use tempfile::NamedTempFile;
 use reqwest::header::{HeaderMap, ACCEPT, USER_AGENT, CONTENT_TYPE};
+use sha2::digest::typenum::private::Trim;
 
 /// Temporary file directory. Should be in same filesystem as MP_SOURCE.
 const TEMP_DIR : &'static str = "data/temp";
@@ -53,8 +54,15 @@ pub async  fn parse_wiki_data(file: File) -> anyhow::Result<Vec<(String, String,
     println!("Got data from file: {}", raw.to_string());
     let raw = raw.get("results").unwrap().get("bindings").and_then(|v|v.as_array()).ok_or_else(||anyhow!("Can't parse wiki data json."))?;
     for mp in raw {
-       let id = mp.get("mp").unwrap().get("value").expect("Can't find mp value in json").as_str().unwrap();
-        println!("Found MP {id}");
+       let id = mp.get("mp").unwrap().get("value").expect("Can't find mp ID in json").as_str().unwrap();
+       let district = mp.get("districtLabel").unwrap().get("value").expect("Can't find mp's district in json").as_str().unwrap();
+       let name = mp.get("mpLabel").unwrap().get("value").expect("Can't find mp's name in json").as_str().unwrap();
+       let img = mp.get("image");
+        let img = match img {
+            Some(img) => img.get("value").expect("Can't find mp's name in json").as_str().unwrap(),
+            None => ""
+       };
+       println!("Found MP id = {id}, name = {name}, district = {district} img = {img}", id=id, name=name, img=img);
     }
     Ok(mps_data)
 }
