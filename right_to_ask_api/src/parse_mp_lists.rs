@@ -30,8 +30,10 @@ use crate::parse_pdf_util::{parse_pdf_to_strings_with_same_font, extract_string}
 use regex::Regex;
 use calamine::{open_workbook, Xls, Reader, Xlsx};
 use encoding_rs_io::DecodeReaderBytesBuilder;
+use futures::TryFutureExt;
+use serde_json::Value;
 use tempfile::NamedTempFile;
-use crate::parse_util::{download_to_file, download_wiki_data_to_file};
+use crate::parse_util::{download_to_file, download_wiki_data_to_file, parse_wiki_data};
 
 pub const MP_SOURCE : &'static str = "data/MP_source";
 
@@ -610,7 +612,7 @@ fn extract_electorates(mps : &[MP]) -> anyhow::Result<HashSet<String>> {
 
 async fn get_house_reps_json() -> anyhow::Result<NamedTempFile> {
    let client = reqwest::Client::new();
-   let queryString = concat!(
+   let query_string = concat!(
         // "#Current members of the Australian House of Representatives with electorate, party, picture and date they assumed office\n" ,
         "SELECT ?mp ?mpLabel ?districtLabel ?partyLabel ?assumedOffice (sample(?image) as ?image) where {\n" ,
         "  # Get all mps\n" ,
@@ -636,7 +638,8 @@ async fn get_house_reps_json() -> anyhow::Result<NamedTempFile> {
         "} GROUP BY ?mp ?mpLabel ?districtLabel ?partyLabel ?assumedOffice ORDER BY ?mpLabel",
         // " &format=json"
         );
-    let file :NamedTempFile = download_wiki_data_to_file(&*queryString, client).await?;
+    let file:NamedTempFile = download_wiki_data_to_file(&*query_string, client).await?;
+    // let raw_data : serde_json::Value = serde_json::from_reader(&file)?;
     Ok(file)
 }
 
@@ -710,9 +713,12 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     parse_australian_house_reps_pdf(house_reps_pdf.path(),&extract_electorates(&australian_house_reps_res)?)?;
     house_reps_pdf.persist(dir.join(Chamber::Australian_House_Of_Representatives.to_string()+".pdf"))?;
     // Could update there seems to be a new easier to parse format https://www.aph.gov.au/Senators_and_Members/Parliamentarian_Search_Results?expand=1&q=&mem=1&par=-1&gen=0&ps=50&st=1
-    // Attempt to get pictures from Wikipedia
-    let wiki_json:NamedTempFile = get_house_reps_json().await?;
-    wiki_json.persist(dir.join("wiki.json"))?;
+    // Attempt to get pictures & summaries from Wikipedia
+    // The data file contains IDs for each MP, and links to each jpg
+    let wiki_data_file = get_house_reps_json().await?;
+    wiki_data_file.persist(dir.join("wiki.json"))?;
+    println!("Persisted wiki data file");
+    get_photos_and_summaries(dir.join("wiki.json").to_str().unwrap()).await?;
 
     // NSW
     let la = download_to_file("https://www.parliament.nsw.gov.au/_layouts/15/NSWParliament/memberlistservice.aspx?members=LA&format=Excel").await?;
@@ -729,6 +735,24 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
 
     Ok(())
 
+}
+
+/// Currently only gets photos
+async fn get_photos_and_summaries(json_file : &str) -> anyhow::Result<Vec<String>> {
+    println!("Getting photos and summaries - got json file {}", json_file);
+    let found : Vec<(String, String, String, String)> = parse_wiki_data(File::open(json_file).unwrap()).await.unwrap();
+    println!("Returned from summaries: {} {} {} {}", found[0].0, found[0].1, found[1].0, found[1].1);
+    // let mut ids = wikidata_IDs.as_array().unwrap();
+    let mut ids = Vec::new();
+    /*
+    let raw = wikidata_IDs.get("results").unwrap().get("bindings").and_then(|v|v.as_array()).ok_or_else(||anyhow!("Could not parse wikidata json.")).unwrap();
+    for mp in raw {
+        let id = mp["mp"]["value"].as_str().ok_or_else(||anyhow!("Could not parse json.")).unwrap();
+        ids.push(id.to_string());
+        println!("Found MP ID {id}")
+    }
+     */
+    Ok(ids)
 }
 
 /// Create "data/MP_source/MPs.json" from the source files downloaded by update_mp_list_of_files(). Second of the two stages for generating MPs.json

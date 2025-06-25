@@ -1,6 +1,8 @@
 //! Utilities for parse_upcoming_hearings.rs and parse_mp_lists.rs
 
+use std::fs::File;
 use std::io::Write;
+use anyhow::anyhow;
 use reqwest::Client;
 use tempfile::NamedTempFile;
 use reqwest::header::{HeaderMap, ACCEPT, USER_AGENT, CONTENT_TYPE};
@@ -40,6 +42,21 @@ pub(crate) async fn download_wiki_data_to_file(query:&str, client: Client) -> an
     file.write_all(&content)?;
     file.flush()?;
     Ok(file)
+}
+
+/// Read the json data stored in file; return a tuple of ID, Name, district, and image url
+/// TODO: a struct might be better for this.
+pub async  fn parse_wiki_data(file: File) -> anyhow::Result<Vec<(String, String, String, String)>> {
+    let mut mps_data : Vec<(String, String, String, String)> = Vec::new();
+    mps_data.push(("This".to_string(), "is".to_string(), "a".to_string(), "test".to_string()));
+    let raw : serde_json::Value = serde_json::from_reader(file)?;
+    println!("Got data from file: {}", raw.to_string());
+    let raw = raw.get("results").unwrap().get("bindings").and_then(|v|v.as_array()).ok_or_else(||anyhow!("Can't parse wiki data json."))?;
+    for mp in raw {
+       let id = mp.get("mp").unwrap().get("value").expect("Can't find mp value in json").as_str().unwrap();
+        println!("Found MP {id}");
+    }
+    Ok(mps_data)
 }
 
 pub fn relative_url(base_url:&str,url:&str) -> anyhow::Result<String> {
