@@ -433,6 +433,7 @@ async fn main() -> anyhow::Result<()> {
             .service(reset_times_sent)
             .service(get_times_sent)
             .service(take_off_times_sent_list)
+            .service(actix_files::Files::new("/pics/", "data/MP_source/pics").use_last_modified(true).use_etag(true).show_files_listing())
             .service(actix_files::Files::new("/journal/", "journal").use_last_modified(true).use_etag(true).show_files_listing())
             .service(actix_files::Files::new("/", find_web_resources()).use_last_modified(true).use_etag(true).index_file("index.html"))
     })

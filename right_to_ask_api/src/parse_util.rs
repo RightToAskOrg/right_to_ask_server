@@ -11,7 +11,7 @@ use reqwest::header::{HeaderMap, ACCEPT, USER_AGENT, CONTENT_TYPE};
 use serde_json::Value;
 
 /// Temporary file directory. Should be in same filesystem as MP_SOURCE.
-const TEMP_DIR : &'static str = "data/temp";
+pub(crate) const TEMP_DIR : &'static str = "data/temp";
 const DD_USER_AGENT : &'static str = "right-to-ask/api; https://www.democracydevelopers.org.au/; info@democracydevelopers.org.au";
 pub const WIKI_DATA_BASE_URL : &'static str = "https://query.wikidata.org/sparql?query=";
 
