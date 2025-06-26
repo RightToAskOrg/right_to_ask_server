@@ -57,7 +57,7 @@ pub(crate) async fn download_wikipedia_file(insecure_url:&str, client: &Client) 
     headers.insert(USER_AGENT, DD_USER_AGENT.parse().unwrap());
     headers.insert(ACCEPT, "application/json".parse().unwrap());
     headers.insert(CONTENT_TYPE, "application/sparql-query".parse().unwrap());
-    let response = client.post(url)
+    let response = client.get(url)
         .headers(headers)
         .send()
         .await?;
