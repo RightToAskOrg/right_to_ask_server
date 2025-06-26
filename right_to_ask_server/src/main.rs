@@ -314,6 +314,9 @@ async fn hearings() -> Result<Vec<u8>,Box<dyn std::error::Error + 'static>> {
     Ok(data.deref().clone()) // UGH!!! Why do I have to clone this?????
 }
 
+/// FIXME - now I want to get "/pics/electorate/someone.[jpg/png]"
+/// ***
+
 /// Information that the client should get at the very start to see if the client is too old, and
 /// whether lists should be downloaded.
 #[derive(serde::Serialize)]

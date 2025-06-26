@@ -34,7 +34,10 @@ use futures::TryFutureExt;
 use itertools::Itertools;
 use serde_json::Value;
 use tempfile::NamedTempFile;
-use crate::parse_util::{download_to_file, download_wiki_data_to_file, parse_wiki_data};
+use crate::parse_util::{download_to_file, download_wiki_data_to_file, download_wikipedia_data, download_wikipedia_file, parse_wiki_data};
+// FIXME I really don't understand why we need percent_encoding - there must be something in url.
+use percent_encoding::{percent_encode, utf8_percent_encode, AsciiSet, CONTROLS};
+use url::form_urlencoded::byte_serialize;
 
 pub const MP_SOURCE : &'static str = "data/MP_source";
 
@@ -611,7 +614,11 @@ fn extract_electorates(mps : &[MP]) -> anyhow::Result<HashSet<String>> {
     mps.iter().map(|mp|mp.electorate.region.as_ref().map(|s|s.to_string()).ok_or_else(||anyhow!("Missing electorate"))).collect()
 }
 
-async fn get_house_reps_json(client: reqwest::Client) -> anyhow::Result<NamedTempFile> {
+/// Get wikidata download for all the house of reps MPs.
+/// TODO: Think about how this should be structured for multiple chambers. Possibly we just want one
+/// function and one big .json file with all the data for each chamber, or possibly we want to pass
+/// the chamber into the function.
+async fn get_house_reps_json(client : &reqwest::Client) -> anyhow::Result<NamedTempFile> {
    let query_string = concat!(
         // "#Current members of the Australian House of Representatives with electorate, party, picture and date they assumed office\n" ,
         "SELECT ?mp ?mpLabel ?districtLabel ?partyLabel ?assumedOffice (sample(?image) as ?image) where {\n" ,
@@ -638,7 +645,7 @@ async fn get_house_reps_json(client: reqwest::Client) -> anyhow::Result<NamedTem
         "} GROUP BY ?mp ?mpLabel ?districtLabel ?partyLabel ?assumedOffice ORDER BY ?mpLabel",
         // " &format=json"
         );
-    let file:NamedTempFile = download_wiki_data_to_file(&*query_string, client).await?;
+    let file:NamedTempFile = download_wiki_data_to_file(&*query_string, &client).await?;
     // let raw_data : serde_json::Value = serde_json::from_reader(&file)?;
     Ok(file)
 }
@@ -716,10 +723,10 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     // Attempt to get pictures & summaries from Wikipedia
     // The data file contains IDs for each MP, and links to each jpg
     let client = reqwest::Client::new();
-    let wiki_data_file = get_house_reps_json(client).await?;
+    let wiki_data_file = get_house_reps_json(&client).await?;
     wiki_data_file.persist(dir.join("wiki.json"))?;
     println!("Persisted wiki data file");
-    get_photos_and_summaries(dir.join("wiki.json").to_str().unwrap()).await?;
+    get_photos_and_summaries(dir.join("wiki.json").to_str().unwrap(), &client).await?;
 
     // NSW
     let la = download_to_file("https://www.parliament.nsw.gov.au/_layouts/15/NSWParliament/memberlistservice.aspx?members=LA&format=Excel").await?;
@@ -740,30 +747,63 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
 
 /// Currently only gets photos
 /// Returns name, district, summary and optional path/filename for downloaded picture.
-async fn get_photos_and_summaries(json_file : &str) -> anyhow::Result<Vec<(String,String, String, Option<String>)>> {
+async fn get_photos_and_summaries(json_file : &str, client : &reqwest::Client) -> anyhow::Result<Vec<(String, String, String, Option<String>)>> {
     println!("Getting photos and summaries - got json file {}", json_file);
     let found : Vec<(String, String, String, Option<String>)> = parse_wiki_data(File::open(json_file).unwrap()).await.unwrap();
     println!("Returned from summaries: {} {} {}", found[0].0, found[0].1, found[0].2);
-    // let mut ids = wikidata_IDs.as_array().unwrap();
     let mut results: Vec<(String, String, String, Option<String>)> = Vec::new();
-    
-    /*
-        "/",
-        "pics",
-        "/",
-        "/"
-    ));
-     */
-    for (id, name, district, img) in found {
+    const WIKIPEDIA_API_URL : &str = "https://www.wikidata.org/w/api.php?";
+    const EN_WIKIPEDIA_API_URL : &str = "https://en.wikipedia.org/w/api.php?";
+    const WIKIPEDIA_SITE_LINKS_REQUEST : &str = "action=wbgetentities&props=sitelinks/urls&sitefilter=enwiki&format=json&ids=";
+    const WIKIPEDIA_EXTRACT_REQUEST : &str = "action=query&prop=extracts&exintro=&exsentences=2&explaintext=&redirects=&format=json&titles=";
+
+    for (name, district, id, img) in found {
+        // Get the person's title from their ID (this is usually their name but may have disambiguating
+        // extra characters for common names
+        // TODO Actually we should be able to pipe the IDs, e.g.
+        // https://www.wikidata.org/w/api.php?action=wbgetentities&props=sitelinks/urls&ids=Q134309102|Q112131017&sitefilter=enwiki&format=json
+        // and hence make far fewer queries. I _think_ a max of 50 might apply.
+        // But just doing one for now.
+        let url = format!("{}{}{}", WIKIPEDIA_API_URL.to_string(), WIKIPEDIA_SITE_LINKS_REQUEST, &id);
+        println!("Processing {name}");
+        let response = download_wikipedia_data(url.as_str(), client).await?;
+        let title1 = response.get("entities").unwrap();
+        let title2 = title1.get(&id).unwrap();
+        let title3 = title2.get("sitelinks").unwrap();
+        let title4 = title3.get("enwiki").unwrap();
+        let title = title4.get("title").unwrap().as_str().ok_or(anyhow!("can't get title for {}", &id))?;
+        println!("found title {} for url {}", title, url);
+
+        // Now get their summary using their title.
+        // Again, we could pipe the titles.
+        // https://en.wikipedia.org/w/api.php?action=query&prop=extracts&titles=Ali%20France&exintro=&exsentences=2&explaintext=&redirects=&formatversion=2
+        let encoded_title : String = byte_serialize(title.as_bytes()).collect();
+        // FIXME I do not understand why I need to do this.
+        let percent_encoded_title = encoded_title.replace("+", "%20");
+        let summary_url : String = format!("{}{}{}", 
+                    EN_WIKIPEDIA_API_URL.to_string(), 
+                    WIKIPEDIA_EXTRACT_REQUEST.to_string(),
+                    percent_encoded_title);
+        let response = download_wikipedia_data(summary_url.as_str(), client).await?;
+        let mut summary = "temp summary.";
+        // There's actually only one page number per page (I think), but since we don't know what they are,
+        // the easiest way to get them is to iterate over them.
+        let page_values =  response.get("query").unwrap().get("pages").unwrap().as_object().unwrap();
+        for (page_id, page_data) in page_values {
+           let  extract = page_data.get("extract").unwrap();
+           println!("found extract {} for {}", extract, title);
+           summary = extract.as_str().unwrap();
+        }
+        // let extract2 = response.get("query").unwrap().get("pages").unwrap()[0].get("extract").ok_or(anyhow!("can't get extract for {}", &title))?;
+
+        
+        // Now get the image
         let path = format!("{}/pics/{}/{}/", MP_SOURCE.to_string(), Chamber::Australian_House_Of_Representatives, &district);
         // Make a directory labelled with the electorate.
         std::fs::create_dir_all(&path)?;
-        // TODO pull summaries
-        let summary = "temp summary";
         match img {
             Some(url) => {
-                let tempfile = download_to_file(url.as_str()).await?;
-                // TODO - get right extn.
+                let tempfile = download_wikipedia_file(url.as_str(), client).await?;
                 let extn_regexp = Regex::new(r".(?<extn>\w+)$").unwrap();
                 let extn = &extn_regexp.captures(url.as_str()).unwrap()["extn"].to_string();
                 println!("Got image {} with extension {}", url, &extn);
@@ -774,14 +814,6 @@ async fn get_photos_and_summaries(json_file : &str) -> anyhow::Result<Vec<(Strin
             None => results.push((name, district, summary.to_string(), None))
         }
     }
-    /*
-    let raw = wikidata_IDs.get("results").unwrap().get("bindings").and_then(|v|v.as_array()).ok_or_else(||anyhow!("Could not parse wikidata json.")).unwrap();
-    for mp in raw {
-        let id = mp["mp"]["value"].as_str().ok_or_else(||anyhow!("Could not parse json.")).unwrap();
-        ids.push(id.to_string());
-        println!("Found MP ID {id}")
-    }
-     */
     Ok(results)
 }
 

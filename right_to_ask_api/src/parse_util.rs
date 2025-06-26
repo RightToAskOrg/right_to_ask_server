@@ -8,7 +8,7 @@ use regex::Regex;
 use reqwest::Client;
 use tempfile::NamedTempFile;
 use reqwest::header::{HeaderMap, ACCEPT, USER_AGENT, CONTENT_TYPE};
-use sha2::digest::typenum::private::Trim;
+use serde_json::Value;
 
 /// Temporary file directory. Should be in same filesystem as MP_SOURCE.
 const TEMP_DIR : &'static str = "data/temp";
@@ -27,9 +27,49 @@ pub(crate) async fn download_to_file(url:&str) -> anyhow::Result<NamedTempFile> 
     Ok(file)
 }
 
+
+/// Download a single wikipedia file (with proper polite headers)
+/// and return as a json value
+pub(crate) async fn download_wikipedia_data(insecure_url:&str, client: &Client) -> anyhow::Result<Value> {
+    let url = insecure_url.replace("http://", "https://");
+    println!("Downloading wiki data from {}", &url);
+    let mut headers = HeaderMap::new();
+    headers.insert(USER_AGENT, DD_USER_AGENT.parse().unwrap());
+    headers.insert(ACCEPT, "application/json".parse().unwrap());
+    headers.insert(CONTENT_TYPE, "application/sparql-query".parse().unwrap());
+    let response = client.get(url)
+        .headers(headers)
+        .send()
+        .await?;
+    let content = response.json().await?;
+    Ok(content)
+}
+
+/// Download a single wikipedia file (with proper polite headers)
+/// So far suspiciously identical to download_wiki_data_to_file
+/// except for the URL
+pub(crate) async fn download_wikipedia_file(insecure_url:&str, client: &Client) -> anyhow::Result<NamedTempFile> {
+    let url = insecure_url.replace("http://", "https://");
+    println!("Downloading wiki data to file from {}", &url);
+    std::fs::create_dir_all(TEMP_DIR)?;
+    let mut file = NamedTempFile::new_in(TEMP_DIR)?;
+    let mut headers = HeaderMap::new();
+    headers.insert(USER_AGENT, DD_USER_AGENT.parse().unwrap());
+    headers.insert(ACCEPT, "application/json".parse().unwrap());
+    headers.insert(CONTENT_TYPE, "application/sparql-query".parse().unwrap());
+    let response = client.post(url)
+        .headers(headers)
+        .send()
+        .await?;
+    let content = response.bytes().await?;
+    file.write_all(&content)?;
+    file.flush()?;
+    Ok(file)
+}
+
 /// Download a json file using a wikidata query.
-pub(crate) async fn download_wiki_data_to_file(query:&str, client: Client) -> anyhow::Result<NamedTempFile> {
-    println!("Downloading wiki data");
+pub(crate) async fn download_wiki_data_to_file(query:&str, client: &Client) -> anyhow::Result<NamedTempFile> {
+    println!("Downloading wiki data to json file from query");
     std::fs::create_dir_all(TEMP_DIR)?;
     let mut file = NamedTempFile::new_in(TEMP_DIR)?;
     let mut headers = HeaderMap::new();
@@ -38,7 +78,7 @@ pub(crate) async fn download_wiki_data_to_file(query:&str, client: Client) -> an
     headers.insert(CONTENT_TYPE, "application/sparql-query".parse().unwrap());
     let response = client.post(WIKI_DATA_BASE_URL)
         .headers(headers)
-        .body(query.clone().to_string())
+        .body(query.to_string())
         .send()
         .await?;
     let content = response.bytes().await?;
@@ -51,11 +91,12 @@ pub(crate) async fn download_wiki_data_to_file(query:&str, client: Client) -> an
 /// TODO: a struct might be better for this.
 pub async  fn parse_wiki_data(file: File) -> anyhow::Result<Vec<(String, String, String, Option<String>)>> {
     let mut mps_data : Vec<(String, String, String, Option<String>)> = Vec::new();
-    let raw : serde_json::Value = serde_json::from_reader(file)?;
+    let raw : Value = serde_json::from_reader(file)?;
     println!("Got data from file: {}", raw.to_string());
     let raw = raw.get("results").unwrap().get("bindings").and_then(|v|v.as_array()).ok_or_else(||anyhow!("Can't parse wiki data json."))?;
     for mp in raw {
        let id_url = mp.get("mp").unwrap().get("value").expect("Can't find mp ID in json").as_str().unwrap();
+        // FIXME change to https
        let base_url_regexp = Regex::new(r"http://www.wikidata.org/entity/(?<QID>\w+)").unwrap();
        let id = &base_url_regexp.captures(id_url).unwrap()["QID"]; 
        println!("Got ID {}", id);
