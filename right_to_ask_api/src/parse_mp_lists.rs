@@ -749,7 +749,7 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
 /// Returns name, district, summary and optional (path,filename) for downloaded picture.
 async fn get_photos_and_summaries(json_file : &str, client : &reqwest::Client) -> anyhow::Result<Vec<(String, String, String, Option<(String,String)>)>> {
     println!("Getting photos and summaries - got json file {}", json_file);
-    let found : Vec<(String, String, String, Option<String>)> = parse_wiki_data(File::open(json_file).unwrap()).await.unwrap();
+    let found : Vec<(String, String, String)> = parse_wiki_data(File::open(json_file).unwrap()).await.unwrap();
     println!("Returned from summaries: {} {} {}", found[0].0, found[0].1, found[0].2);
     let mut results: Vec<(String, String, String, Option<(String,String)>)> = Vec::new();
     const WIKIPEDIA_API_URL : &str = "https://www.wikidata.org/w/api.php?";
@@ -758,9 +758,9 @@ async fn get_photos_and_summaries(json_file : &str, client : &reqwest::Client) -
     const WIKIPEDIA_EXTRACT_AND_IMAGES_REQUEST: &str = "action=query&prop=extracts|pageimages&exintro=&exsentences=2&explaintext=&redirects=&format=json&titles=";
     const WIKIPEDIA_IMAGE_INFO_REQUEST : &str = "action=query&prop=imageinfo&iiprop=extmetadata|url&format=json&titles=File:";
     
-    for (name, district, id, img) in found {
-        // Get the person's title from their ID (this is usually their name but may have disambiguating
-        // extra characters for common names
+    for (name, district, id) in found {
+        // Get the person's wikipedia title from their ID (this is usually their name but may have disambiguating
+        // extra characters for common names)
         // TODO Actually we should be able to pipe the IDs, e.g.
         // https://www.wikidata.org/w/api.php?action=wbgetentities&props=sitelinks/urls&ids=Q134309102|Q112131017&sitefilter=enwiki&format=json
         // and hence make far fewer queries. I _think_ a max of 50 might apply.
@@ -777,7 +777,7 @@ async fn get_photos_and_summaries(json_file : &str, client : &reqwest::Client) -
 
         // Now get their summary & image info using their title.
         // Again, we could pipe the titles.
-        "https://en.wikipedia.org/w/api.php?action=query&prop=extracts|pageimages&exintro=&exsentences=2&explaintext=&redirects=&format=json&titles=Ali%20France";
+        // "https://en.wikipedia.org/w/api.php?action=query&prop=extracts|pageimages&exintro=&exsentences=2&explaintext=&redirects=&format=json&titles=Ali%20France";
         let encoded_title : String = byte_serialize(title.as_bytes()).collect();
         // FIXME I do not understand why I need to do this.
         let percent_encoded_title = encoded_title.replace("+", "%20");
@@ -793,15 +793,13 @@ async fn get_photos_and_summaries(json_file : &str, client : &reqwest::Client) -
         let pages =  response.get("query").unwrap().get("pages").unwrap().as_object().unwrap();
         // There's only ever 1 page, but if there happened to be more we would miss them.
         let (_, page_data) = pages.iter().next().unwrap();
-        // for (page_id, page_data) in pages {
-           let  extract = page_data.get("extract").unwrap();
-           println!("found extract {} for {}", extract, title);
-           summary = extract.as_str().unwrap();
-           image_name = page_data.get("pageimage");
-            if !image_name.is_none() {
-                println!("found image name {:?} for {}", image_name.unwrap().as_str(), title);
-            }
-        // }
+        let extract = page_data.get("extract").unwrap();
+        println!("found extract {} for {}", extract, title);
+        summary = extract.as_str().unwrap();
+        image_name = page_data.get("pageimage");
+        if !image_name.is_none() {
+            println!("found image name {:?} for {}", image_name.unwrap().as_str(), title);
+        }
         
         // Now get the image and its usage message
         let path = format!("{}/pics/{}/{}/", MP_SOURCE.to_string(), Chamber::Australian_House_Of_Representatives, &district);
