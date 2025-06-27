@@ -829,15 +829,20 @@ async fn get_photos_and_summaries(json_file : &str, client : &reqwest::Client) -
                     .get("Artist").unwrap()
                     .get("value").unwrap().as_str().unwrap();
                 println!("found artist {} for {}", artist, title);
-                let license_short_name = image_metadata
-                    .get("Artist").unwrap()
-                    .get("value").unwrap().as_str().unwrap();
-                // TODO - deal with the case where there's no license url. We should probably check
+                let license_short : String = image_metadata
+                    .get("LicenseShortName").unwrap()
+                    .get("value").unwrap().as_str().unwrap().to_string();
+                let license_short_name = license_short.replace("\"", "");
+                // TODO We should probably check
                 // what the license actually is, e.g. whether AttributionRequired is true.
-                let license_url= image_metadata.get("LicenseUrl").and_then(
-                     |l| l.get("value")).and_then(
-                    |v| v.as_str());
-                let attr = "This is a test"; // FIXME format!("Artist: {artist}. License <A href={license_url}>{license_short_name}</A>");
+                let mut href : String = String::new();
+                let license_url : Option<&str> = image_metadata.get("LicenseUrl")
+                    .and_then(|l| l.get("value"))
+                    .and_then(|v| {
+                        href.push_str(format!("<A href={:?}>{}</A>", v.as_str().unwrap(), license_short_name).as_str()); 
+                        Some(href.as_str())
+                    });
+                let attr = format!("Artist: {artist}. License: {} via Wikimedia Commons.\n", license_url.unwrap_or_else(|| license_short_name.as_str()));
                 
                 let url = image_info.get("url").unwrap().as_str().unwrap();
                 println!("found image url {} for {}", url, title);
