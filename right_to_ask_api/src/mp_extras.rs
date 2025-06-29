@@ -27,7 +27,9 @@ pub struct MPNonAuthoritative {
 pub struct ImageInfo {
     pub path: String,
     pub name: String,
-    pub attribution: String,
+    pub artist: String,
+    pub attribution_short_name: String,
+    pub attribution_url: Option<String>, 
     pub description: String
 }
 
