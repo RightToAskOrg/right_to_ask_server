@@ -1,0 +1,182 @@
+//! Parse various files from non-authoritative sources such as Wikipedia, to add to information
+//! derived in parse_mp-lists.
+//!
+use std::path::{PathBuf, Path};
+use std::fs::File;
+use crate::mp::{MP, MPSpec};
+use crate::regions::{Electorate, Chamber, State, RegionContainingOtherRegions};
+use std::str::FromStr;
+use anyhow::anyhow;
+use std::collections::{HashMap, HashSet};
+use std::convert::TryFrom;
+use std::fmt::Display;
+use std::io::{Read, Write};
+use scraper::Selector;
+use crate::parse_pdf_util::{parse_pdf_to_strings_with_same_font, extract_string};
+use regex::Regex;
+use calamine::{open_workbook, Xls, Reader, Xlsx};
+use encoding_rs_io::DecodeReaderBytesBuilder;
+use futures::TryFutureExt;
+use itertools::Itertools;
+use serde_json::Value;
+use tempfile::NamedTempFile;
+use crate::parse_util::{download_to_file, download_wiki_data_to_file, download_wikipedia_data, download_wikipedia_file, parse_wiki_data};
+use url::form_urlencoded::byte_serialize;
+
+pub const MP_SOURCE : &'static str = "data/MP_source";
+
+/// Get wikidata download for all the house of reps MPs.
+/// TODO: Think about how this should be structured for multiple chambers. Possibly we just want one
+/// function and one big .json file with all the data for each chamber, or possibly we want to pass
+/// the chamber into the function.
+pub async fn get_house_reps_json(client : &reqwest::Client) -> anyhow::Result<NamedTempFile> {
+   let query_string = concat!(
+        // "#Current members of the Australian House of Representatives with electorate, party, picture and date they assumed office\n" ,
+        "SELECT ?mp ?mpLabel ?districtLabel ?partyLabel ?assumedOffice (sample(?image) as ?image) where {\n" ,
+        "  # Get all mps\n" ,
+        "  ?mp p:P39 ?posheld; # With position held\n" ,
+        "           p:P102 ?partystatement. # And with a certain party\n" ,
+        "\n" ,
+        "  # Get the party\n" ,
+        "  ?partystatement ps:P102 ?party.\n" ,
+        "  MINUS { ?partystatement pq:P582 ?partyEnd. } # but minus the ones the mp is no longer a member of\n" ,
+        "  MINUS { ?party wdt:P361 ?partOf. } # and the 'Minnesota Democratic–Farmer–Labor Party' and such\n" ,
+        "\n" ,
+        "  # Check on the position in the senate\n" ,
+        "  ?posheld ps:P39 wd:Q18912794; # Position held is in the Australian house of reps\n" ,
+        "           pq:P768 ?district;\n" ,
+        "           pq:P580 ?assumedOffice. # And should have a starttime\n" ,
+        "\n" ,
+        "  MINUS { ?posheld pq:P582 ?endTime. } # But not an endtime\n" ,
+        "\n" ,
+        "  # Add an image\n" ,
+        "  OPTIONAL { ?mp wdt:P18 ?image. }\n" ,
+        "\n" ,
+        "  SERVICE wikibase:label { bd:serviceParam wikibase:language \"[AUTO_LANGUAGE],mul,en\". }\n" ,
+        "} GROUP BY ?mp ?mpLabel ?districtLabel ?partyLabel ?assumedOffice ORDER BY ?mpLabel",
+        // " &format=json"
+        );
+    let file:NamedTempFile = download_wiki_data_to_file(&*query_string, &client).await?;
+    // let raw_data : serde_json::Value = serde_json::from_reader(&file)?;
+    Ok(file)
+}
+
+/// Returns name, district, summary and optional (path,filename) for downloaded picture.
+pub async fn get_photos_and_summaries(json_file : &str, client : &reqwest::Client) -> anyhow::Result<Vec<(String, String, String, Option<(String,String)>)>> {
+    println!("Getting photos and summaries - got json file {}", json_file);
+    let found : Vec<(String, String, String)> = parse_wiki_data(File::open(json_file).unwrap()).await.unwrap();
+    println!("Returned from summaries: {} {} {}", found[0].0, found[0].1, found[0].2);
+    let mut results: Vec<(String, String, String, Option<(String,String)>)> = Vec::new();
+    const WIKIPEDIA_API_URL : &str = "https://www.wikidata.org/w/api.php?";
+    const EN_WIKIPEDIA_API_URL : &str = "https://en.wikipedia.org/w/api.php?";
+    const WIKIPEDIA_SITE_LINKS_REQUEST : &str = "action=wbgetentities&props=sitelinks/urls&sitefilter=enwiki&format=json&ids=";
+    const WIKIPEDIA_EXTRACT_AND_IMAGES_REQUEST: &str = "action=query&prop=extracts|pageimages&exintro=&exsentences=2&explaintext=&redirects=&format=json&titles=";
+    const WIKIPEDIA_IMAGE_INFO_REQUEST : &str = "action=query&prop=imageinfo&iiprop=extmetadata|url&format=json&titles=File:";
+    
+    for (name, district, id) in found {
+        // Get the person's wikipedia title from their ID (this is usually their name but may have disambiguating
+        // extra characters for common names)
+        // TODO Actually we should be able to pipe the IDs, e.g.
+        // https://www.wikidata.org/w/api.php?action=wbgetentities&props=sitelinks/urls&ids=Q134309102|Q112131017&sitefilter=enwiki&format=json
+        // and hence make far fewer queries. I _think_ a max of 50 might apply.
+        // But just doing one for now.
+        let url = format!("{}{}{}", WIKIPEDIA_API_URL.to_string(), WIKIPEDIA_SITE_LINKS_REQUEST, &id);
+        println!("Processing {name}");
+        let response = download_wikipedia_data(url.as_str(), client).await?;
+        let title1 = response.get("entities").unwrap();
+        let title2 = title1.get(&id).unwrap();
+        let title3 = title2.get("sitelinks").unwrap();
+        let title4 = title3.get("enwiki").unwrap();
+        let title = title4.get("title").unwrap().as_str().ok_or(anyhow!("can't get title for {}", &id))?;
+        println!("found title {} for url {}", title, url);
+
+        // Now get their summary & image info using their title.
+        // Again, we could pipe the titles.
+        // "https://en.wikipedia.org/w/api.php?action=query&prop=extracts|pageimages&exintro=&exsentences=2&explaintext=&redirects=&format=json&titles=Ali%20France";
+        let encoded_title : String = byte_serialize(title.as_bytes()).collect();
+        // FIXME I do not understand why I need to do this.
+        let percent_encoded_title = encoded_title.replace("+", "%20");
+        let summary_url : String = format!("{}{}{}",
+                                           EN_WIKIPEDIA_API_URL.to_string(),
+                                           WIKIPEDIA_EXTRACT_AND_IMAGES_REQUEST.to_string(),
+                                           percent_encoded_title);
+        let response = download_wikipedia_data(summary_url.as_str(), client).await?;
+        let mut summary = "temp summary.";
+        let mut image_name : Option<&Value> = None;
+        // There's actually only one page number per page (I think), but since we don't know what they are,
+        // the easiest way to get them is to iterate over them.
+        let pages =  response.get("query").unwrap().get("pages").unwrap().as_object().unwrap();
+        // There's only ever 1 page, but if there happened to be more we would miss them.
+        let (_, page_data) = pages.iter().next().unwrap();
+        let extract = page_data.get("extract").unwrap();
+        println!("found extract {} for {}", extract, title);
+        summary = extract.as_str().unwrap();
+        image_name = page_data.get("pageimage");
+        if !image_name.is_none() {
+            println!("found image name {:?} for {}", image_name.unwrap().as_str(), title);
+        }
+        
+        // Now get the image and its usage message
+        let path = format!("{}/pics/{}/{}/", MP_SOURCE.to_string(), Chamber::Australian_House_Of_Representatives, &district);
+        // Make a directory labelled with the electorate.
+        std::fs::create_dir_all(&path)?;
+        match image_name {
+            Some(filename) => {
+                // First get the image metadata
+                let metadata_url: String = format!("{}{}{}",
+                                                   EN_WIKIPEDIA_API_URL.to_string(),
+                                                   WIKIPEDIA_IMAGE_INFO_REQUEST.to_string(),
+                                                   // Get rid of "
+                                                   filename.to_string().replace("\"", ""));
+                let response = download_wikipedia_data(metadata_url.as_str(), client).await?;
+                let pages = response.get("query").unwrap()
+                    .get("pages").unwrap().as_object().unwrap();
+                
+                // There's only ever 1 page, but if there happened to be more we would miss them.
+                let (_, page_data) = pages.iter().next().unwrap();
+                let image_info = &page_data
+                    .get("imageinfo").unwrap()
+                    .as_array().unwrap()[0];
+                let image_metadata = image_info.get("extmetadata").unwrap();
+                let artist = image_metadata
+                    .get("Artist").unwrap()
+                    .get("value").unwrap().as_str().unwrap();
+                println!("found artist {} for {}", artist, title);
+                let license_short : String = image_metadata
+                    .get("LicenseShortName").unwrap()
+                    .get("value").unwrap().as_str().unwrap().to_string();
+                let license_short_name = license_short.replace("\"", "");
+                // TODO We should probably check
+                // what the license actually is, e.g. whether AttributionRequired is true.
+                let license_url : Option<String> = image_metadata.get("LicenseUrl")
+                    .and_then(|l| l.get("value"))
+                    .and_then(|v| Some(format!("<A href={:?}>{}</A>", v.as_str().unwrap(), license_short_name)));
+                let attr = format!("Artist: {artist}. License: {} via Wikimedia Commons.\n", license_url.unwrap_or_else(|| license_short_name));
+                
+                let url = image_info.get("url").unwrap().as_str().unwrap();
+                println!("found image url {} for {}", url, title);
+
+                // Store the attribution in the appropriate directory, as a text file.
+                std::fs::create_dir_all(crate::parse_util::TEMP_DIR)?;
+                let mut attribution_file = NamedTempFile::new_in(crate::parse_util::TEMP_DIR)?;
+                attribution_file.write_all(attr.as_bytes())?;
+                attribution_file.flush()?;
+                let filepath = format!("{}/{}.{}", path, "attr", "txt");
+                attribution_file.persist(&filepath)?;
+                
+                
+                // Then download the actual file
+                let tempfile = download_wikipedia_file(url, client).await?;
+                let extn_regexp = Regex::new(r".(?<extn>\w+)$").unwrap();
+                let extn = &extn_regexp.captures(url).unwrap()["extn"].to_string();
+                println!("Got image {} with extension {}", url, &extn);
+                let escaped_name = name.replace(" ", "_");
+                let filepath = format!("{}/{}.{}", path, escaped_name, extn);
+                tempfile.persist(&filepath)?;
+                results.push((name, district, summary.to_string(), Some((path, escaped_name))));
+            },
+            None => results.push((name, district, summary.to_string(), None))
+        }
+    }
+    Ok(results)
+}
