@@ -13,8 +13,6 @@
 //!
 //! From datasources listed on https://github.com/RightToAskOrg/technical-docs/blob/main/ParliamentaryDataSources.md
 
-
-
 use std::path::{PathBuf, Path};
 use std::fs::File;
 use crate::mp::{MP, MPSpec};
@@ -35,8 +33,6 @@ use itertools::Itertools;
 use serde_json::Value;
 use tempfile::NamedTempFile;
 use crate::parse_util::{download_to_file, download_wiki_data_to_file, download_wikipedia_data, download_wikipedia_file, parse_wiki_data};
-// FIXME I really don't understand why we need percent_encoding - there must be something in url.
-use percent_encoding::{percent_encode, utf8_percent_encode, AsciiSet, CONTROLS};
 use url::form_urlencoded::byte_serialize;
 
 pub const MP_SOURCE : &'static str = "data/MP_source";
@@ -99,6 +95,7 @@ fn parse_csv_getting_extra<F:Read>(file : F,chamber:Chamber,surname_heading:&str
             email: col_email.map(|c|&record[c]).unwrap_or("").to_string(),
             role: cols_role.iter().map(|&c|&record[c]).fold(String::new(),|s,r|if r.is_empty() {s} else {(if s.is_empty() {s} else {s+"; "})+r}),
             party: record[col_party].to_string(),
+            non_authoritative: None
         };
         // println!("{}",mp);
         mps.push(mp);
@@ -322,6 +319,7 @@ fn parse_act_la(path:&Path) -> anyhow::Result<Vec<MP>> {
                 email: email.to_string(),
                 role,
                 party : party.to_string(),
+                non_authoritative: None,
         };
         mps.push(mp);
     }
@@ -369,6 +367,7 @@ fn parse_wa(path:&Path,chamber:Chamber) -> anyhow::Result<Vec<MP>> {
             email,
             role : roles.join("; "),
             party : party.ok_or_else(||anyhow!("Could not find party in WA html file"))?,
+            non_authoritative : None
         };
         //println!("{}",mp);
         mps.push(mp);
@@ -477,6 +476,7 @@ fn parse_nt_la_pdf(path:&Path) -> anyhow::Result<Vec<MP>> {
                         email: email.to_string(),
                         role: roles.join("; "),
                         party: party.take().ok_or_else(||anyhow!("No NT party found"))?,
+                        non_authoritative : None
                     };
                     // println!("{}",mp);
                     mps.push(mp);
@@ -511,6 +511,7 @@ fn parse_qld_parliament(path: &Path)  -> anyhow::Result<Vec<MP>> {
                     email: cell(col_email)?,
                     role: cell(col_role)?,
                     party: cell(col_party)?,
+                    non_authoritative: None
                 };
                 // println!("{}",mp);
                 mps.push(mp);
@@ -534,7 +535,8 @@ fn parse_sa(file:File,chamber:Chamber) -> anyhow::Result<Vec<MP>> {
             electorate: Electorate { chamber, region: if chamber==Chamber::SA_Legislative_Council {None} else {Some(string_field("electorateName")?)} },
             email: email.to_string(),  // NB Heidi Girolamo does not have an email on this list.
             role: field("positions")?.as_array().ok_or_else(||anyhow!("SA Json file position field not array")).and_then(|v|v.iter().map(|e|e.as_str().map(|s|s.to_string()).ok_or_else(||anyhow!("SA Json file position entry not string"))).collect::<anyhow::Result<Vec<String>>>())?.join("; "),
-            party: string_field("politicalPartyName")?
+            party: string_field("politicalPartyName")?,
+            non_authoritative: None
         };
         //println!("{}",mp);
         mps.push(mp);
@@ -577,6 +579,7 @@ fn parse_tas(path:&Path,chamber:Chamber) -> anyhow::Result<Vec<MP>> {
                     email: cell(col_email)?,
                     role: cell(col_role)?,
                     party: cell(col_party)?,
+                    non_authoritative: None
                 };
                 if empty_electorate {
                     // Unfortunately there seems to be no guarantee that the empty electorates come first,

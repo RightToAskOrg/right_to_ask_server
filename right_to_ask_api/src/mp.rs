@@ -11,7 +11,7 @@ use itertools::Itertools;
 use mysql::prelude::Queryable;
 use crate::common_file::MPS;
 use crate::minister::MinisterId;
-use crate::mp_extras::MPNonAuthoritative;
+use crate::mp_non_authoritative::MPNonAuthoritative;
 use crate::question::OrgID;
 
 /// Information about a MP (or other human elected representative, e.g. senator).
