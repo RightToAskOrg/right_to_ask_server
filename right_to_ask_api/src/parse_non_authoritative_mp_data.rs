@@ -127,35 +127,34 @@ pub async fn get_photos_and_summaries(
             let mut image_name: Option<&Value> = None;
             // There's actually only one page number per page (I think), but since we don't know what they are,
             // the easiest way to get them is to iterate over them.
-            let pages = response
+            let opt_pages = response
                 .get("query")
-                .unwrap()
-                .get("pages")
-                .unwrap()
-                .as_object()
-                .unwrap();
+                .and_then(|q| q.get("pages"))
+                .and_then(|p| p.as_object());
             // There's only ever 1 page, but if there happened to be more we would miss them.
-            let (_, page_data) = pages.iter().next().unwrap();
-            let extract = page_data.get("extract").unwrap();
-            println!("found extract {} for {}", extract, title);
-            summary = extract.as_str().unwrap();
-            image_name = page_data.get("pageimage");
-            if !image_name.is_none() {
-                println!(
-                    "found image name {:?} for {}",
-                    image_name.unwrap().as_str(),
-                    title
-                );
+            if let Some(pages) = opt_pages {
+                let (_, page_data) = pages.iter().next().unwrap();
+                let extract = page_data.get("extract").unwrap();
+                println!("found extract {} for {}", extract, title);
+                summary = extract.as_str().unwrap();
+                image_name = page_data.get("pageimage");
+                if !image_name.is_none() {
+                    println!(
+                        "found image name {:?} for {}",
+                        image_name.unwrap().as_str(),
+                        title
+                    );
+                }
             }
-
-            // Now get the image and its usage message
+            
+            // Make a directory labelled with the electorate.
             let path = format!(
                 "{}/pics/{}/{}/",
                 MP_SOURCE.to_string(),
                 Chamber::Australian_House_Of_Representatives,
                 &district
             );
-            // Make a directory labelled with the electorate.
+                
             std::fs::create_dir_all(&path)?;
             match image_name {
                 Some(filename) => {
