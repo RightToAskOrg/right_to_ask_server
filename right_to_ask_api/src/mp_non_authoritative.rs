@@ -20,7 +20,8 @@ use crate::question::OrgID;
 /// This is Information about current MPs, rather than a definition of an MP at some point in time.
 #[derive(Serialize,Deserialize,Debug,Clone)]
 pub struct MPNonAuthoritative {
-    pub wikipedia_title : String,
+    pub wikipedia_title : Option<String>, // Note we possibly don't need this - can just have Wikipedia page
+    pub wikipedia_summary : Option<String>,
     pub name: String,
     pub img_data : Option<ImageInfo>, // path, filename, attribution
     pub electorate_name : String,
@@ -29,9 +30,10 @@ pub struct MPNonAuthoritative {
 
 #[derive(Serialize,Deserialize,Debug,Clone)]
 pub struct ImageInfo {
-    pub path: String,
-    pub name: String,
+    pub path: String,  // The path in our system (e.g. /chamber/electorate-name/)
+    pub filename: String, // The filename for our stored version (e.g. person-name.[jpg/png])
     pub artist: String,
+    pub source_url: String, // The url we got the image from
     pub attribution_short_name: String,
     pub attribution_url: Option<String>, 
     pub description: String
