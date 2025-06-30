@@ -18,7 +18,8 @@ use crate::question::OrgID;
 /// Information about a MP (or other human elected representative, e.g. senator).
 /// Not all fields are known perfectly for each person.
 /// This is Information about current MPs, rather than a definition of an MP at some point in time.
-#[derive(Serialize,Deserialize,Debug,Clone)]
+/// Defaults to None Options, empty strings and empty maps.
+#[derive(Serialize,Deserialize,Debug,Clone,Default)]
 pub struct MPNonAuthoritative {
     pub wikipedia_title : Option<String>, // Note we possibly don't need this - can just have Wikipedia page
     pub wikipedia_summary : Option<String>,
@@ -28,7 +29,7 @@ pub struct MPNonAuthoritative {
     pub links : HashMap<String, String>  // meant to be, e.g. ``Wikipedia, {wikipedia page}''
 }
 
-#[derive(Serialize,Deserialize,Debug,Clone)]
+#[derive(Serialize,Deserialize,Debug,Clone,Default)]
 pub struct ImageInfo {
     pub path: String,  // The path in our system (e.g. /chamber/electorate-name/)
     pub filename: String, // The filename for our stored version (e.g. person-name.[jpg/png])

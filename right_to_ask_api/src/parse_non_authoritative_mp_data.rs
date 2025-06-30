@@ -26,7 +26,7 @@ use std::str::FromStr;
 use tempfile::NamedTempFile;
 use toml::to_string;
 use url::form_urlencoded::byte_serialize;
-use crate::mp_non_authoritative::ImageInfo;
+use crate::mp_non_authoritative::{ImageInfo, MPNonAuthoritative};
 
 pub const MP_SOURCE: &'static str = "data/MP_source";
 
@@ -84,16 +84,20 @@ pub async fn get_photos_and_summaries(
     let found: Vec<(String, String, String)> = parse_wiki_data(File::open(json_file)?).await?;
     let mut results: Vec<(String, String, String, Option<(String, String)>)> = Vec::new();
 
-    for (name, district, id) in found {
+    for (name, electorate_name, id) in found {
 
         // Make a directory labelled with the electorate.
         let path = format!(
             "{}/pics/{}/{}/",
             MP_SOURCE.to_string(),
             Chamber::Australian_House_Of_Representatives,
-            &district
+            &electorate_name
         );
         std::fs::create_dir_all(&path)?;
+        
+        // Make the MP data structure into which all this info will be stored.
+        let mut mp: MPNonAuthoritative 
+            = MPNonAuthoritative{name:name.clone(), electorate_name:electorate_name.clone(), ..Default::default()}; 
 
         // Get the person's wikipedia title from their ID (this is usually their name but may have disambiguating
         // extra characters for common names)
@@ -107,7 +111,7 @@ pub async fn get_photos_and_summaries(
             WIKIPEDIA_SITE_LINKS_REQUEST,
             &id
         );
-        println!("Processing {name}");
+        println!("Processing {}", &name);
         let response = download_wikipedia_data(url.as_str(), client).await?;
         let opt_title: Option<&str> = response
             .get("entities")
@@ -129,6 +133,7 @@ pub async fn get_photos_and_summaries(
             let encoded_title: String = byte_serialize(title.as_bytes()).collect();
             // FIXME I do not understand why I need to do this.
             let percent_encoded_title = encoded_title.replace("+", "%20");
+            mp.wikipedia_title = Some(title.to_string());
             let summary_url: String = format!(
                 "{}{}{}",
                 EN_WIKIPEDIA_API_URL.to_string(),
@@ -146,22 +151,22 @@ pub async fn get_photos_and_summaries(
                 .and_then(|p| p.as_object());
             // There's only ever 1 page, so just get the first one (but if there happened to be more we would miss them).
             if let Some(pages) = opt_pages {
-                let (_, page_data) = pages.iter().next().unwrap();
-                let extract = page_data.get("extract").unwrap();
-                println!("found extract {} for {}", extract, title);
-                summary = extract.as_str().unwrap();
-                image_name = page_data.get("pageimage");
-                if !image_name.is_none() {
-                    println!(
-                        "found image name {:?} for {}",
-                        image_name.unwrap().as_str(),
-                        title
-                    );
-                }
-            }
+                if let Some((_, page_data)) = pages.iter().next() {
+
+                    // let extract = 
+                    // println!("found extract {} for {}", extract, title);
+                    // summary = extract.as_str().unwrap();
+                    mp.wikipedia_summary = page_data.get("extract").map(|s| s.to_string());
+                    image_name = page_data.get("pageimage");
+                    if !image_name.is_none() {
+                        println!(
+                            "found image name {:?} for {}",
+                            image_name.unwrap().as_str(),
+                            title
+                        );
+                    }
             
-            match image_name {
-                Some(filename) => {
+                if let Some(filename) = image_name.map(|i| i.as_str()) {
                     let img_data: ImageInfo = get_image_info(filename.as_str().unwrap(), client).await?;
 
                     // First get the image metadata
@@ -187,14 +192,19 @@ pub async fn get_photos_and_summaries(
                     let escaped_name = name.replace(" ", "_");
                     let filepath = format!("{}/{}.{}", path, escaped_name, extn);
                     tempfile.persist(&filepath)?;
+                    mp.img_data = ImageInfo{**TODO}
+                    /*
                     results.push((
                         name,
-                        district,
+                        electorate_name,
                         summary.to_string(),
                         Some((path, escaped_name)),
                     ));
+                    
+                     */
                 }
-                None => results.push((name, district, summary.to_string(), None)),
+            }
+                }
             }
         }
     }
