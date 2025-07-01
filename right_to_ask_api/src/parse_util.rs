@@ -111,3 +111,8 @@ pub fn relative_url(base_url:&str,url:&str) -> anyhow::Result<String> {
     let res = base.join(url)?;
     Ok(res.to_string())
 }
+
+/// Strip the outer quotes, either '...' or "...", from a string, if present.
+pub fn strip_quotes(s: &str) -> String {
+   todo!();
+}

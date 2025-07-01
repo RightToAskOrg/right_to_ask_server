@@ -79,10 +79,10 @@ pub async fn get_house_reps_json(client: &reqwest::Client) -> anyhow::Result<Nam
 pub async fn get_photos_and_summaries(
     json_file: &str,
     client: &reqwest::Client,
-) -> anyhow::Result<Vec<(String, String, String, Option<(String, String)>)>> {
+) -> anyhow::Result<Vec<MPNonAuthoritative>> {
     println!("Getting photos and summaries - got json file {}", json_file);
     let found: Vec<(String, String, String)> = parse_wiki_data(File::open(json_file)?).await?;
-    let mut results: Vec<(String, String, String, Option<(String, String)>)> = Vec::new();
+    let mut results: Vec<MPNonAuthoritative> = Vec::new();
 
     for (name, electorate_name, id) in found {
 
@@ -94,10 +94,11 @@ pub async fn get_photos_and_summaries(
             &electorate_name
         );
         std::fs::create_dir_all(&path)?;
-        
+
         // Make the MP data structure into which all this info will be stored.
-        let mut mp: MPNonAuthoritative 
-            = MPNonAuthoritative{name:name.clone(), electorate_name:electorate_name.clone(), ..Default::default()}; 
+        let mut mp: MPNonAuthoritative
+            = MPNonAuthoritative { name: name.clone(), electorate_name: electorate_name.clone(),
+                 path: path.clone(), ..Default::default() };
 
         // Get the person's wikipedia title from their ID (this is usually their name but may have disambiguating
         // extra characters for common names)
@@ -141,8 +142,7 @@ pub async fn get_photos_and_summaries(
                 percent_encoded_title
             );
             let response = download_wikipedia_data(summary_url.as_str(), client).await?;
-            let mut summary = "temp summary.";
-            let mut image_name: Option<&Value> = None;
+            // let mut image_name: Option<&Value> = None;
             // There's actually only one page number per page (I think), but since we don't know what they are,
             // the easiest way to get them is to iterate over them.
             let opt_pages = response
@@ -157,58 +157,76 @@ pub async fn get_photos_and_summaries(
                     // println!("found extract {} for {}", extract, title);
                     // summary = extract.as_str().unwrap();
                     mp.wikipedia_summary = page_data.get("extract").map(|s| s.to_string());
-                    image_name = page_data.get("pageimage");
+                    let image_name = page_data.get("pageimage").map(|s| s.to_string().replace("\"",""));
                     if !image_name.is_none() {
                         println!(
                             "found image name {:?} for {}",
-                            image_name.unwrap().as_str(),
+                            image_name.as_ref(),
                             title
                         );
                     }
-            
-                if let Some(filename) = image_name.map(|i| i.as_str()) {
-                    let img_data: ImageInfo = get_image_info(filename.as_str().unwrap(), client).await?;
 
-                    // First get the image metadata
+                    if let Some(filename_with_quotes) = image_name {
 
-                    // Store the attribution in the appropriate directory, as a text file.
-                    std::fs::create_dir_all(crate::parse_util::TEMP_DIR)?;
-                    let mut attribution_file = NamedTempFile::new_in(crate::parse_util::TEMP_DIR)?;
-                    let attr = format!(
-                        "Artist: {}. License: {} via Wikimedia Commons.\n",
-                        img_data.artist,
-                        img_data.attribution_url.unwrap_or_else(|| img_data.attribution_short_name)
-                    );
-                    attribution_file.write_all(attr.as_bytes())?;
-                    attribution_file.flush()?;
-                    let filepath = format!("{}/{}.{}", path, "attr", "txt");
-                    attribution_file.persist(&filepath)?;
+                        // First get the image metadata
+                        let filename = filename_with_quotes.replace("\"", "");
+                        let img_data: ImageInfo = get_image_info(&filename.as_ref(), client).await?;
 
-                    // Then download the actual file
-                    let tempfile = download_wikipedia_file(&img_data.source_url, client).await?;
-                    let extn_regexp = Regex::new(r".(?<extn>\w+)$").unwrap();
-                    let extn = &extn_regexp.captures(&img_data.source_url).unwrap()["extn"].to_string();
-                    println!("Got image {} with extension {}", url, &extn);
-                    let escaped_name = name.replace(" ", "_");
-                    let filepath = format!("{}/{}.{}", path, escaped_name, extn);
-                    tempfile.persist(&filepath)?;
-                    mp.img_data = ImageInfo{**TODO}
-                    /*
-                    results.push((
-                        name,
-                        electorate_name,
-                        summary.to_string(),
-                        Some((path, escaped_name)),
-                    ));
-                    
-                     */
-                }
-            }
+                        // Store the attribution in the appropriate directory, as a text file.
+                        store_attr_txt(&img_data, &path).await?;
+
+                        // Then download the actual file
+                        let tempfile = download_wikipedia_file(&img_data.source_url, client).await?;
+                        let extn_regexp = Regex::new(r".(?<extn>\w+)$").unwrap();
+                        let extn = &extn_regexp.captures(&img_data.source_url).unwrap()["extn"].to_string();
+                        println!("Got image {} with extension {}", url, &extn);
+                        let escaped_name = name.replace(" ", "_");
+                        let filepath = format!("{}/{}.{}", path, escaped_name, extn);
+                        tempfile.persist(&filepath)?;
+
+                        mp.img_data = Some(img_data);
+
+                        /*
+                        results.push((
+                            name,
+                            electorate_name,
+                            summary.to_string(),
+                            Some((path, escaped_name)),
+                        ));
+
+                         */
+                    }
                 }
             }
         }
+        println!("Found MP {mp:?}");
+        results.push(mp);
     }
     Ok(results)
+}
+
+/// Store a pretty-printed text file with the attribution info, into the directory in which the
+/// image will be posted.
+async fn store_attr_txt(img_data: &ImageInfo, path: &String) -> anyhow::Result<File> {
+    std::fs::create_dir_all(crate::parse_util::TEMP_DIR)?;
+    let mut attribution_file = NamedTempFile::new_in(crate::parse_util::TEMP_DIR)?;
+    let attr = format!(
+        "Artist: {}. License: {} via Wikimedia Commons.\n",
+        &img_data.artist,
+        if let Some(attribution_url) = &img_data.attribution_url {
+            format!(
+                "<A href={:?}>{}</A>",
+                attribution_url,
+                &img_data.attribution_short_name
+            )
+        } else {
+            img_data.attribution_short_name.clone()
+        }
+    );
+    attribution_file.write_all(attr.as_bytes())?;
+    attribution_file.flush()?;
+    let filepath = format!("{}/{}.{}", path, "attr", "txt");
+    Ok(attribution_file.persist(&filepath)?)
 }
 
 async fn get_image_info(filename: &str, client: &reqwest::Client) -> anyhow::Result<ImageInfo> {
@@ -232,13 +250,21 @@ async fn get_image_info(filename: &str, client: &reqwest::Client) -> anyhow::Res
     let (_, page_data) = pages.iter().next().unwrap();
     let image_info = &page_data.get("imageinfo").unwrap().as_array().unwrap()[0];
     let image_metadata = image_info.get("extmetadata").unwrap();
+    let description = image_metadata
+        .get("ImageDescription")
+        .unwrap()
+        .get("value")
+        .unwrap()
+        .to_string()
+        .replace("\"", "");
     let artist = image_metadata
         .get("Artist")
         .unwrap()
         .get("value")
         .unwrap()
         .as_str()
-        .unwrap();
+        .unwrap()
+        .replace("\"\'", "");
     println!("found artist {} for {}", artist, filename);
     let license_short: String = image_metadata
         .get("LicenseShortName")
@@ -255,6 +281,7 @@ async fn get_image_info(filename: &str, client: &reqwest::Client) -> anyhow::Res
         .get("LicenseUrl")
         .and_then(|l| l.get("value"))
         .and_then(|v| {
+            // FIXME delete
             Some(format!(
                 "<A href={:?}>{}</A>",
                 v.as_str().unwrap(),
@@ -266,13 +293,12 @@ async fn get_image_info(filename: &str, client: &reqwest::Client) -> anyhow::Res
     println!("found image url {} for {}", url, filename);
 
     let default_info : ImageInfo = ImageInfo {
-        path: String::from("Temp path"),
+        description,
         filename: filename.to_string(),
         artist: artist.to_string(),
         source_url: url.to_string(),
         attribution_short_name: license_short_name.clone(),
         attribution_url: license_url.clone(),
-        description: String::from("Temp descr"), // TODO
     };
     Ok(default_info)
 }

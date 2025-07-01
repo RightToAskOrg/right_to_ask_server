@@ -21,23 +21,23 @@ use crate::question::OrgID;
 /// Defaults to None Options, empty strings and empty maps.
 #[derive(Serialize,Deserialize,Debug,Clone,Default)]
 pub struct MPNonAuthoritative {
-    pub wikipedia_title : Option<String>, // Note we possibly don't need this - can just have Wikipedia page
+    pub wikipedia_title : Option<String>, // Note we possibly don't need this - can just have Wikipedia page in links.
     pub wikipedia_summary : Option<String>,
     pub name: String,
     pub img_data : Option<ImageInfo>, // path, filename, attribution
     pub electorate_name : String,
-    pub links : HashMap<String, String>  // meant to be, e.g. ``Wikipedia, {wikipedia page}''
+    pub links : HashMap<String, String>,  // meant to be, e.g. ``Wikipedia, {wikipedia page}''
+    pub path: String,  // The path in our system (e.g. /chamber/electorate-name/)
 }
 
 #[derive(Serialize,Deserialize,Debug,Clone,Default)]
 pub struct ImageInfo {
-    pub path: String,  // The path in our system (e.g. /chamber/electorate-name/)
     pub filename: String, // The filename for our stored version (e.g. person-name.[jpg/png])
-    pub artist: String,
+    pub description: String, // The description (to accompany the photo) - usually just the name.
+    pub artist: String, // Artist name, from Wikipedia. This is often html.
     pub source_url: String, // The url we got the image from
     pub attribution_short_name: String,
     pub attribution_url: Option<String>, 
-    pub description: String
 }
 
 impl MPNonAuthoritative {
