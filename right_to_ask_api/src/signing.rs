@@ -4,12 +4,13 @@
 use std::convert::TryFrom;
 use std::fmt::{Display, Formatter};
 use once_cell::sync::Lazy;
-use ed25519_dalek::{SigningKey,Signature, VerifyingKey,Verifier,pkcs8::DecodePrivateKey};
+use ed25519_dalek::{SigningKey, Signature, VerifyingKey, Verifier, pkcs8::DecodePrivateKey, SecretKey};
 use ed25519_dalek::ed25519::signature::{Signer};
-use serde::{Serialize,Deserialize};
+use pkcs8::PrivateKeyInfo;
+use serde::{Serialize, Deserialize};
 use crate::config::CONFIG;
 use serde::de::DeserializeOwned;
-use crate::person::get_user_public_key_by_id;
+use crate::person::{get_user_public_key_by_id, PublicKey};
 
 pub fn base64_decode(s:&str)-> Result<Vec<u8>, base64::DecodeError> {
     use base64::Engine;

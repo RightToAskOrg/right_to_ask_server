@@ -114,5 +114,40 @@ pub fn relative_url(base_url:&str,url:&str) -> anyhow::Result<String> {
 
 /// Strip the outer quotes, either '...' or "...", from a string, if present.
 pub fn strip_quotes(s: &str) -> String {
-   todo!();
+    let double_quote_regexp = Regex::new("^\"(?s)(?<M>.?)\"$").unwrap();
+    // let single_quote_regexp = Regex::new("^\'(?s)(?<N>.?)\'$").unwrap();
+    let matched = &double_quote_regexp.captures(s);
+    if let Some(inner) = matched {
+       inner["M"].to_string()
+    } else {
+        s.to_string()
+    }
+    // let msg2 = &single_quote_regexp.captures(msg).unwrap()["N"];
+}
+
+/// extracts as a string a nested json value, by getting each field in sequence.
+/// if strip_quotes is true, it applies strip_quotes before returning the string.
+pub fn extract_nested_json(json:&Value, fields: &Vec<String>, strip_quotes: bool) -> Option<String> {
+
+    todo!();
+    /*
+    for field in fields {
+        json.get(field).map(|v|{})
+    }
+     */
+
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_strip_quotes1() {
+        assert_eq!("Hi", strip_quotes("\"Hi\""));
+        assert_eq!("Hi", strip_quotes("\'Hi\'"));
+        assert_eq!("Hi", strip_quotes("Hi"));
+        assert_eq!("\'Hi", strip_quotes("\'Hi"));
+        assert_eq!("Hi\"", strip_quotes("Hi\""));
+    }
 }

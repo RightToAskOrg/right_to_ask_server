@@ -21,7 +21,7 @@ use crate::question::OrgID;
 /// Defaults to None Options, empty strings and empty maps.
 #[derive(Serialize,Deserialize,Debug,Clone,Default)]
 pub struct MPNonAuthoritative {
-    pub wikipedia_title : Option<String>, // Note we possibly don't need this - can just have Wikipedia page in links.
+    // pub wikipedia_title : Option<String>, // Note we possibly don't need this - can just have Wikipedia page in links.
     pub wikipedia_summary : Option<String>,
     pub name: String,
     pub img_data : Option<ImageInfo>, // path, filename, attribution

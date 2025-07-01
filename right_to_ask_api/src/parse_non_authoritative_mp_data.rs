@@ -3,10 +3,7 @@
 //!
 use crate::mp::{MP, MPSpec};
 use crate::parse_pdf_util::{extract_string, parse_pdf_to_strings_with_same_font};
-use crate::parse_util::{
-    download_to_file, download_wiki_data_to_file, download_wikipedia_data, download_wikipedia_file,
-    parse_wiki_data,
-};
+use crate::parse_util::{download_to_file, download_wiki_data_to_file, download_wikipedia_data, download_wikipedia_file, parse_wiki_data, strip_quotes};
 use crate::regions::{Chamber, Electorate, RegionContainingOtherRegions, State};
 use anyhow::anyhow;
 use calamine::{Reader, Xls, Xlsx, open_workbook};
@@ -38,6 +35,8 @@ const WIKIPEDIA_SITE_LINKS_REQUEST: &str =
 const WIKIPEDIA_EXTRACT_AND_IMAGES_REQUEST: &str = "action=query&prop=extracts|pageimages&exintro=&exsentences=2&explaintext=&redirects=&format=json&titles=";
 const WIKIPEDIA_IMAGE_INFO_REQUEST: &str =
     "action=query&prop=imageinfo&iiprop=extmetadata|url&format=json&titles=File:";
+// How to get a wikipedia page link from a pageID.
+const WIKIPEDIA_PAGE_FROM_ID: &str = "https://en.wikipedia.org/?curid=";
 
 /// Get wikidata download for all the house of reps MPs.
 /// TODO: Think about how this should be structured for multiple chambers. Possibly we just want one
@@ -134,7 +133,7 @@ pub async fn get_photos_and_summaries(
             let encoded_title: String = byte_serialize(title.as_bytes()).collect();
             // FIXME I do not understand why I need to do this.
             let percent_encoded_title = encoded_title.replace("+", "%20");
-            mp.wikipedia_title = Some(title.to_string());
+            // mp.wikipedia_title = Some(title.to_string());
             let summary_url: String = format!(
                 "{}{}{}",
                 EN_WIKIPEDIA_API_URL.to_string(),
@@ -151,12 +150,21 @@ pub async fn get_photos_and_summaries(
                 .and_then(|p| p.as_object());
             // There's only ever 1 page, so just get the first one (but if there happened to be more we would miss them).
             if let Some(pages) = opt_pages {
-                if let Some((_, page_data)) = pages.iter().next() {
+                if let Some((page_id, page_data)) = pages.iter().next() {
+
+                    // Add the wikipedia page as a link.
+                    let mut links = HashMap::new();
+                    links.insert(String::from("wikipedia"),
+                                 format!("{}{}", WIKIPEDIA_PAGE_FROM_ID, page_id.to_string()));
+                    mp.links = links;
 
                     // let extract = 
                     // println!("found extract {} for {}", extract, title);
                     // summary = extract.as_str().unwrap();
-                    mp.wikipedia_summary = page_data.get("extract").map(|s| s.to_string());
+                    mp.wikipedia_summary = page_data
+                        .get("extract")
+                        .and_then(|s| s.as_str())
+                        .map(|s| strip_quotes(s));
                     let image_name = page_data.get("pageimage").map(|s| s.to_string().replace("\"",""));
                     if !image_name.is_none() {
                         println!(
@@ -185,16 +193,6 @@ pub async fn get_photos_and_summaries(
                         tempfile.persist(&filepath)?;
 
                         mp.img_data = Some(img_data);
-
-                        /*
-                        results.push((
-                            name,
-                            electorate_name,
-                            summary.to_string(),
-                            Some((path, escaped_name)),
-                        ));
-
-                         */
                     }
                 }
             }
@@ -250,21 +248,17 @@ async fn get_image_info(filename: &str, client: &reqwest::Client) -> anyhow::Res
     let (_, page_data) = pages.iter().next().unwrap();
     let image_info = &page_data.get("imageinfo").unwrap().as_array().unwrap()[0];
     let image_metadata = image_info.get("extmetadata").unwrap();
-    let description = image_metadata
+    let description = strip_quotes(image_metadata
         .get("ImageDescription")
         .unwrap()
         .get("value")
-        .unwrap()
-        .to_string()
-        .replace("\"", "");
-    let artist = image_metadata
+        .unwrap().as_str().unwrap());
+    let artist = strip_quotes(image_metadata
         .get("Artist")
         .unwrap()
         .get("value")
         .unwrap()
-        .as_str()
-        .unwrap()
-        .replace("\"\'", "");
+        .as_str().unwrap());
     println!("found artist {} for {}", artist, filename);
     let license_short: String = image_metadata
         .get("LicenseShortName")
@@ -274,20 +268,14 @@ async fn get_image_info(filename: &str, client: &reqwest::Client) -> anyhow::Res
         .as_str()
         .unwrap()
         .to_string();
-    let license_short_name = license_short.replace("\"", "");
+    let license_short_name = strip_quotes(&license_short);
     // TODO We should probably check
     // what the license actually is, e.g. whether AttributionRequired is true.
     let license_url: Option<String> = image_metadata
         .get("LicenseUrl")
         .and_then(|l| l.get("value"))
-        .and_then(|v| {
-            // FIXME delete
-            Some(format!(
-                "<A href={:?}>{}</A>",
-                v.as_str().unwrap(),
-                license_short_name
-            ))
-        });
+        .and_then(|v| v.as_str())
+        .map(|s| strip_quotes(s));
 
     let url = image_info.get("url").unwrap().as_str().unwrap();
     println!("found image url {} for {}", url, filename);
