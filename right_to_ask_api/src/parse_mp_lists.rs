@@ -724,7 +724,7 @@ pub fn create_mp_list() -> anyhow::Result<()> {
         let reps_emails = parse_australian_house_reps_pdf(&dir.join(Chamber::Australian_House_Of_Representatives.to_string()+".pdf"),&extract_electorates(&reps_from_csvs)?)?;
         let mut senate_from_csvs = parse_australian_senate(File::open(dir.join(Chamber::Australian_Senate.to_string()+".csv"))?)?;
         for mp in &mut senate_from_csvs {
-            senate_emails.add_email(mp)?;
+            senate_emails.add_email(mp)?; // VT: FIXME - possibly just for now we fallback to a blank to make it run.
         }
         println!("Found {} in the Australian Senate",senate_from_csvs.len());
         mps.extend(senate_from_csvs);

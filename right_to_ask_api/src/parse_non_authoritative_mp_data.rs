@@ -153,14 +153,10 @@ pub async fn get_photos_and_summaries(
                 if let Some((page_id, page_data)) = pages.iter().next() {
 
                     // Add the wikipedia page as a link.
-                    let mut links = HashMap::new();
-                    links.insert(String::from("wikipedia"),
+                    mp.links.insert(String::from("wikipedia"),
                                  format!("{}{}", WIKIPEDIA_PAGE_FROM_ID, page_id.to_string()));
-                    mp.links = links;
 
-                    // let extract = 
-                    // println!("found extract {} for {}", extract, title);
-                    // summary = extract.as_str().unwrap();
+                    // Add the wikipedia summary.
                     mp.wikipedia_summary = page_data
                         .get("extract")
                         .and_then(|s| s.as_str())
@@ -177,20 +173,21 @@ pub async fn get_photos_and_summaries(
                     if let Some(filename_with_quotes) = image_name {
 
                         // First get the image metadata
-                        let filename = filename_with_quotes.replace("\"", "");
-                        let img_data: ImageInfo = get_image_info(&filename.as_ref(), client).await?;
+                        let img_data: ImageInfo = get_image_info(strip_quotes(filename_with_quotes.as_str()).as_str(), client).await?;
 
                         // Store the attribution in the appropriate directory, as a text file.
                         store_attr_txt(&img_data, &path).await?;
 
                         // Then download the actual file
-                        let tempfile = download_wikipedia_file(&img_data.source_url, client).await?;
-                        let extn_regexp = Regex::new(r".(?<extn>\w+)$").unwrap();
-                        let extn = &extn_regexp.captures(&img_data.source_url).unwrap()["extn"].to_string();
-                        println!("Got image {} with extension {}", url, &extn);
-                        let escaped_name = name.replace(" ", "_");
-                        let filepath = format!("{}/{}.{}", path, escaped_name, extn);
-                        tempfile.persist(&filepath)?;
+                        if let Some(img_url) = &img_data.source_url {
+                            let tempfile = download_wikipedia_file(&img_url, client).await?;
+                            let extn_regexp = Regex::new(r".(?<extn>\w+)$").unwrap();
+                            let extn = &extn_regexp.captures(&img_url).unwrap()["extn"].to_string();
+                            println!("Got image {} with extension {}", url, &extn);
+                            let escaped_name = name.replace(" ", "_");
+                            let filepath = format!("{}/{}.{}", path, escaped_name, extn);
+                            tempfile.persist(&filepath)?;
+                        }
 
                         mp.img_data = Some(img_data);
                     }
@@ -208,17 +205,26 @@ pub async fn get_photos_and_summaries(
 async fn store_attr_txt(img_data: &ImageInfo, path: &String) -> anyhow::Result<File> {
     std::fs::create_dir_all(crate::parse_util::TEMP_DIR)?;
     let mut attribution_file = NamedTempFile::new_in(crate::parse_util::TEMP_DIR)?;
+    const UNKNOWN: &str = "Unknown";
+    let short_name : String = match &img_data.attribution_short_name {
+        Some(name) => name.to_string(),
+        None => UNKNOWN.to_string(),
+    };
+    let artist : String = match &img_data.artist {
+        Some(name) => name.to_string(),
+        None => UNKNOWN.to_string(),
+    };
     let attr = format!(
         "Artist: {}. License: {} via Wikimedia Commons.\n",
-        &img_data.artist,
+        artist,
         if let Some(attribution_url) = &img_data.attribution_url {
             format!(
-                "<A href={:?}>{}</A>",
+                "<A href={}>{}</A>",
                 attribution_url,
-                &img_data.attribution_short_name
+                short_name
             )
         } else {
-            img_data.attribution_short_name.clone()
+            short_name
         }
     );
     attribution_file.write_all(attr.as_bytes())?;
@@ -245,30 +251,30 @@ async fn get_image_info(filename: &str, client: &reqwest::Client) -> anyhow::Res
         .unwrap();
 
     // There's only ever 1 page, but if there happened to be more we would miss them.
+
+    // .get("entities")
+    //    .and_then(|q| q.get(&id))
+    //    .and_then(|i| i.get("sitelinks"))
     let (_, page_data) = pages.iter().next().unwrap();
     let image_info = &page_data.get("imageinfo").unwrap().as_array().unwrap()[0];
     let image_metadata = image_info.get("extmetadata").unwrap();
-    let description = strip_quotes(image_metadata
+    let description = image_metadata
         .get("ImageDescription")
-        .unwrap()
-        .get("value")
-        .unwrap().as_str().unwrap());
-    let artist = strip_quotes(image_metadata
+        .and_then(|d| d.get("value"))
+        .and_then(|v| v.as_str())
+        .map(|s| strip_quotes(s));
+    let artist = image_metadata
         .get("Artist")
-        .unwrap()
-        .get("value")
-        .unwrap()
-        .as_str().unwrap());
-    println!("found artist {} for {}", artist, filename);
-    let license_short: String = image_metadata
+        .and_then(|a| a.get("value"))
+        .and_then(|v| v.as_str())
+        .map(|s| strip_quotes(s));
+    // println!("found artist {} for {}", artist.unwrap_or(String::from("None")), filename);
+    let license_short: Option<String> = image_metadata
         .get("LicenseShortName")
-        .unwrap()
-        .get("value")
-        .unwrap()
-        .as_str()
-        .unwrap()
-        .to_string();
-    let license_short_name = strip_quotes(&license_short);
+        .and_then(|l| l.get("value"))
+        .and_then(|v| v.as_str())
+        .map(|s| strip_quotes(s));
+
     // TODO We should probably check
     // what the license actually is, e.g. whether AttributionRequired is true.
     let license_url: Option<String> = image_metadata
@@ -277,16 +283,20 @@ async fn get_image_info(filename: &str, client: &reqwest::Client) -> anyhow::Res
         .and_then(|v| v.as_str())
         .map(|s| strip_quotes(s));
 
-    let url = image_info.get("url").unwrap().as_str().unwrap();
-    println!("found image url {} for {}", url, filename);
+    let url = image_info
+        .get("url")
+        .and_then(|u| u.as_str())
+        .map(|s| strip_quotes(s));
 
-    let default_info : ImageInfo = ImageInfo {
+    // println!("found image url {} for {}", url, filename);
+
+    let info : ImageInfo = ImageInfo {
         description,
         filename: filename.to_string(),
-        artist: artist.to_string(),
-        source_url: url.to_string(),
-        attribution_short_name: license_short_name.clone(),
+        artist,
+        source_url: url,
+        attribution_short_name: license_short,
         attribution_url: license_url.clone(),
     };
-    Ok(default_info)
+    Ok(info)
 }
