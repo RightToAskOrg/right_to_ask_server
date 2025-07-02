@@ -3,7 +3,7 @@
 use std::fs::File;
 use std::io::Write;
 use anyhow::anyhow;
-use itertools::Itertools;
+use mysql_common::frunk::labelled::chars::f;
 use regex::Regex;
 use reqwest::Client;
 use tempfile::NamedTempFile;
@@ -110,6 +110,13 @@ pub fn relative_url(base_url:&str,url:&str) -> anyhow::Result<String> {
     let base = reqwest::Url::parse(base_url)?;
     let res = base.join(url)?;
     Ok(res.to_string())
+}
+
+/// extracts as a string a nested json value, by getting each field in sequence.
+pub fn get_nested_json<'a>(json: &'a serde_json::Value,fields:&[&str]) -> Option<&'a str> {
+    if fields.len() == 0 { json.as_str() }
+    else if let Some(nested) = json.get(fields[0]) { get_nested_json(nested,&fields[1..]) }
+    else { None }
 }
 
 /// extracts as a string a nested json value, by getting each field in sequence.

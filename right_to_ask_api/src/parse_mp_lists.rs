@@ -23,18 +23,13 @@ use anyhow::anyhow;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt::Display;
-use std::io::{Read, Write};
+use std::io::{Read};
 use scraper::Selector;
 use crate::parse_pdf_util::{parse_pdf_to_strings_with_same_font, extract_string};
 use regex::Regex;
 use calamine::{open_workbook, Xls, Reader, Xlsx};
 use encoding_rs_io::DecodeReaderBytesBuilder;
-use futures::TryFutureExt;
-use itertools::Itertools;
-use serde_json::Value;
-use tempfile::NamedTempFile;
-use crate::parse_util::{download_to_file, download_wiki_data_to_file, download_wikipedia_data, download_wikipedia_file, parse_wiki_data};
-use url::form_urlencoded::byte_serialize;
+use crate::parse_util::{download_to_file};
 
 pub const MP_SOURCE : &'static str = "data/MP_source";
 
@@ -672,7 +667,7 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     let wiki_data_file = get_house_reps_json(&client).await?;
     wiki_data_file.persist(dir.join("wiki.json"))?;
     println!("Persisted wiki data file");
-    get_photos_and_summaries(dir.join("wiki.json").to_str().unwrap(), &client).await?;
+    get_photos_and_summaries(dir.join("wiki.json").to_str().unwrap(), Some(&client)).await?;
 
     // NSW
     let la = download_to_file("https://www.parliament.nsw.gov.au/_layouts/15/NSWParliament/memberlistservice.aspx?members=LA&format=Excel").await?;
@@ -702,7 +697,7 @@ pub async fn create_mp_list() -> anyhow::Result<()> {
         let reps_emails = parse_australian_house_reps_pdf(&dir.join(Chamber::Australian_House_Of_Representatives.to_string()+".pdf"),&extract_electorates(&reps_from_csvs)?)?;
         let mut senate_from_csvs = parse_australian_senate(File::open(dir.join(Chamber::Australian_Senate.to_string()+".csv"))?)?;
         for mp in &mut senate_from_csvs {
-            senate_emails.add_email(mp)?; // VT: FIXME - possibly just for now we fallback to a blank to make it run.
+            senate_emails.add_email(mp)?; 
         }
         println!("Found {} in the Australian Senate",senate_from_csvs.len());
         mps.extend(senate_from_csvs);
@@ -780,11 +775,10 @@ pub async fn create_mp_list() -> anyhow::Result<()> {
         println!("Found {} in the WA Legislative Council",found.len());
         mps.extend(found);
     }
-    let non_authoriatative 
-        = get_photos_and_summaries(dir.join("wiki.json").to_str().unwrap(), None).await?;
+    let mut non_authoritative= get_photos_and_summaries(dir.join("wiki.json").to_str().unwrap(), None).await?;
     for mp in &mut mps {
-        if let Some(data) = non_authoriatative.remove(&mp.electorate) {
-            mp.non_authoritative = data;
+        if let Some(data) = non_authoritative.remove(&mp.electorate) {
+            mp.non_authoritative = Some(data);
         }
     }
     
