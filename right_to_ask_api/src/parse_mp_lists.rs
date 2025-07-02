@@ -692,9 +692,9 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
 }
 
 /// Create "data/MP_source/MPs.json" from the source files downloaded by update_mp_list_of_files(). Second of the two stages for generating MPs.json
-pub fn create_mp_list() -> anyhow::Result<()> {
+pub async fn create_mp_list() -> anyhow::Result<()> {
     let dir = PathBuf::from_str(MP_SOURCE)?;
-    let mut mps = Vec::new();
+    let mut mps : Vec<MP> = Vec::new();
     let federal_electorates_by_state = { // deal with Federal (Senate and House of Reps).
         println!("Processing federal");
         let (mut reps_from_csvs,federal_electorates_by_state) = parse_australian_house_reps(File::open(dir.join(Chamber::Australian_House_Of_Representatives.to_string()+".csv"))?)?;
@@ -780,6 +780,14 @@ pub fn create_mp_list() -> anyhow::Result<()> {
         println!("Found {} in the WA Legislative Council",found.len());
         mps.extend(found);
     }
+    let non_authoriatative 
+        = get_photos_and_summaries(dir.join("wiki.json").to_str().unwrap(), None).await?;
+    for mp in &mut mps {
+        if let Some(data) = non_authoriatative.remove(&mp.electorate) {
+            mp.non_authoritative = data;
+        }
+    }
+    
     // Vic list of districts in each region
     println!("Processing Vic districts");
     let vic_districts = hard_coded_victorian_regions(); // parse_vic_district_list(&dir.join("VicDistrictList.html"))?;

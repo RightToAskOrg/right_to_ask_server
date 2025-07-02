@@ -131,9 +131,11 @@ impl FileThatIsSomewhere {
             _ => Ok(())
         }
     }
-} 
+}
 /// Download all the non-authoritative data.
 /// If the client is None, it does no downloading; if the client is present, it is used for downloads.
+/// FIXME instead of a string, use the Electorate Data structure as the key -
+/// use the one that includes both the chamber and the region name.
 pub async fn get_photos_and_summaries(
     json_file: &str,
     opt_client: Option<&reqwest::Client>,
@@ -193,9 +195,9 @@ pub async fn get_photos_and_summaries(
             let temp_file = download_wikipedia_file(url.as_str(), client).await?;
             (temp_file.path().to_path_buf(), Some(temp_file) )
         } else {
-            (PathBuf::from(&entity_data_file), None) 
-        }; 
-        
+            (PathBuf::from(&entity_data_file), None)
+        };
+
         let wikipedia_entity_data : Value = serde_json::from_reader(File::open(&entity_file_path)?)?;
 
         // Parse the wikipedia entity data
@@ -277,11 +279,11 @@ pub async fn get_photos_and_summaries(
 
                         mp.img_data = Some(img_data);
                     }
-                    
+
                 }
             }
         }
-        
+
         // Persist data from first call.
         if let Some(temp_file) = entity_temp_file {
             temp_file.persist(&entity_data_file)?;
