@@ -99,6 +99,7 @@ fn parse_csv_getting_extra<F:Read>(file : F,chamber:Chamber,surname_heading:&str
             non_authoritative: None
         };
         // println!("{}",mp);
+        if mp.first_name.is_empty() && mp.surname.is_empty() { continue; } // ignore blank lines.
         mps.push(mp);
         if let Some(col_extra) = col_extra {
             extra_vec.push(record[col_extra].to_string())
@@ -156,12 +157,13 @@ impl ParsedAustralianSenatePDF {
         if let Some(v) = self.map.get(&mp.surname) {
             for (first,email) in v {
                 if first.contains(&mp.first_name) {
+                    if email=="TBC" { println!("Warning : email is TBC for {} {}.",mp.first_name,mp.surname); }
                     mp.email=email.to_string();
                     return Ok(())
                 }
             }
             Err(anyhow!("Could not match Australian Senate first name {} for surname {} with email data",&mp.first_name,&mp.surname))
-        } else { Err(anyhow!("No email for anyone with surname {}",mp.surname))}
+        } else { Err(anyhow!("No email for anyone with surname {}. Full MP details {:?}",mp.surname,mp))}
     }
 }
 struct ParseAustralianSenatePDFWork {
@@ -177,7 +179,7 @@ impl ParseAustralianSenatePDFWork {
         if email.len()>1000 {
             return Err(anyhow!("Absurdly long Email {}.",email));
         }
-        if email.ends_with("aph.gov.au") {
+        if email.ends_with("aph.gov.au")||email=="TBC" {
             if let Some((first,surname)) = self.current_name.take() {
           //      println!("Australian Senate First {} Surname {} email {}",first,surname,email);
                 self.result.map.entry(surname).or_insert_with(||vec![]).push((first,email))
@@ -376,23 +378,6 @@ fn parse_wa(path:&Path,chamber:Chamber) -> anyhow::Result<Vec<MP>> {
     Ok(mps)
 }
 
-/* Replaced by hard coded list below
-/// Parse the list of which districts are in which electorate in Victoria.
-fn parse_vic_district_list(path:&Path) -> anyhow::Result<Vec<RegionContainingOtherRegions>> {
-    let mut electorates = Vec::new();
-    let html = scraper::Html::parse_document(&std::fs::read_to_string(path)?);
-    let table = html.select(&Selector::parse("table > tbody").unwrap()).next().ok_or_else(||anyhow!("Could not find table in Vic district list html file"))?;
-    for tr in table.select(&Selector::parse("tr > td div.list").unwrap()) {
-        let super_region = tr.select(&Selector::parse("dl dd").unwrap()).next().ok_or_else(||anyhow!("Could not find electorate in Vic district list html file"))?.text().next().ok_or_else(||anyhow!("Could not find electorate"))?.to_string();
-        let regions = tr.select(&Selector::parse("div.district a").unwrap()).map(|e|e.text().next().expect("Expecting a region").to_string()).collect::<Vec<_>>();
-        if !regions.is_empty() {
-            //println!("Electorate {} districts {:?}",super_region,regions);
-            electorates.push(RegionContainingOtherRegions{ super_region, regions });
-        }
-    }
-    Ok(electorates)
-}
-*/
 /// Victoria no longer has a nice list of regions I could find.
 fn hard_coded_victorian_regions() -> Vec<RegionContainingOtherRegions> {
     vec![
@@ -624,18 +609,11 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     let dir = PathBuf::from_str(MP_SOURCE)?;
 
     // NT
-    /* FIXME Comment out for now because not working.
     let nt_members = download_to_file("https://parliament.nt.gov.au/__data/assets/pdf_file/0004/1457113/MASTER-15th-Legislative-Assembly-List-of-Members-for-webpage-March-2025.pdf").await?;
     parse_nt_la_pdf(nt_members.path())?;
     nt_members.persist(dir.join(Chamber::NT_Legislative_Assembly.to_string()+".pdf"))?;
-    */
-
-/* Page no longer exists.
-    // Vic list of districts in each region
-    let district_list = download_to_file("https://www.parliament.vic.gov.au/component/fabrik/list/26").await?;
-    parse_vic_district_list(district_list.path())?;
-    district_list.persist(dir.join("VicDistrictList.html"))?;
-*/
+   
+    
     // WA
     let la = download_to_file("https://www.parliament.wa.gov.au/parliament/memblist.nsf/WebCurrentMembLA?OpenView").await?;
     parse_wa(la.path(),Chamber::WA_Legislative_Assembly)?;
@@ -694,7 +672,7 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     let wiki_data_file = get_house_reps_json(&client).await?;
     wiki_data_file.persist(dir.join("wiki.json"))?;
     println!("Persisted wiki data file");
-    get_photos_and_summaries(dir.join("wiki.json").to_str().unwrap(), &client).await?;
+    //get_photos_and_summaries(dir.join("wiki.json").to_str().unwrap(), &client).await?;
 
     // NSW
     let la = download_to_file("https://www.parliament.nsw.gov.au/_layouts/15/NSWParliament/memberlistservice.aspx?members=LA&format=Excel").await?;
@@ -755,14 +733,10 @@ pub fn create_mp_list() -> anyhow::Result<()> {
         mps.extend(found);
     }
     { // Deal with NT
-        println!("NT Processing commented out for now.");
-        /*
         println!("Processing NT");
-        FIXME - commented out because file not downloading.
         let found=parse_nt_la_pdf(&dir.join(Chamber::NT_Legislative_Assembly.to_string()+".pdf"))?;
         println!("Found {} in the NT Legislative Assembly",found.len());
         mps.extend(found);
-        */
     }
     { // Deal with QLD
         println!("Processing Qld");
