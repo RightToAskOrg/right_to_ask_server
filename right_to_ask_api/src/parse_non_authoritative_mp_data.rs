@@ -26,7 +26,8 @@ use url::form_urlencoded::byte_serialize;
 use crate::mp_non_authoritative::{ImageInfo, MPNonAuthoritative};
 
 pub const MP_SOURCE: &'static str = "data/MP_source";
-
+pub const TEMP_DIR: &'static str = "non_authoritative_data";
+pub const PICS_DIR: &'static str = "pics";
 
 const WIKIPEDIA_API_URL: &str = "https://www.wikidata.org/w/api.php?";
 const EN_WIKIPEDIA_API_URL: &str = "https://en.wikipedia.org/w/api.php?";
@@ -42,6 +43,7 @@ const WIKIPEDIA_PAGE_FROM_ID: &str = "https://en.wikipedia.org/?curid=";
 /// TODO: Think about how this should be structured for multiple chambers. Possibly we just want one
 /// function and one big .json file with all the data for each chamber, or possibly we want to pass
 /// the chamber into the function.
+/// Also we don't use these images, so we can delete that bit.
 pub async fn get_house_reps_json(client: &reqwest::Client) -> anyhow::Result<NamedTempFile> {
     let query_string = concat!(
         // "#Current members of the Australian House of Representatives with electorate, party, picture and date they assumed office\n" ,
@@ -55,7 +57,7 @@ pub async fn get_house_reps_json(client: &reqwest::Client) -> anyhow::Result<Nam
         "  MINUS { ?partystatement pq:P582 ?partyEnd. } # but minus the ones the mp is no longer a member of\n",
         "  MINUS { ?party wdt:P361 ?partOf. } # and the 'Minnesota Democratic–Farmer–Labor Party' and such\n",
         "\n",
-        "  # Check on the position in the senate\n",
+        "  # Check on the position \n",
         "  ?posheld ps:P39 wd:Q18912794; # Position held is in the Australian house of reps\n",
         "           pq:P768 ?district;\n",
         "           pq:P580 ?assumedOffice. # And should have a starttime\n",
@@ -74,21 +76,41 @@ pub async fn get_house_reps_json(client: &reqwest::Client) -> anyhow::Result<Nam
     Ok(file)
 }
 
-/// Returns name, district, summary and optional (path,filename) for downloaded picture.
+/// Returns name, district, summary and optional (path,filename) for downloaded picture,
+/// as a map from electorate name to the non-authoritative data about the MP.
+pub async fn process_non_authoritative_mp_data()
+ -> anyhow::Result<HashMap<String, MPNonAuthoritative>> {
+
+    // Make a directory labelled with the electorate.
+    /*
+    let path = format!(
+        "{}/pics/{}/{}/",
+        MP_SOURCE.to_string(),
+        Chamber::Australian_House_Of_Representatives,
+        &electorate_name
+    );
+    std::fs::create_dir_all(&path)?;
+    */
+    todo!()
+}
+
+/// Download all the non-authoritative data.
 pub async fn get_photos_and_summaries(
     json_file: &str,
     client: &reqwest::Client,
-) -> anyhow::Result<Vec<MPNonAuthoritative>> {
+) -> anyhow::Result<HashMap<String, MPNonAuthoritative>> {
     println!("Getting photos and summaries - got json file {}", json_file);
     let found: Vec<(String, String, String)> = parse_wiki_data(File::open(json_file)?).await?;
-    let mut results: Vec<MPNonAuthoritative> = Vec::new();
+    let mut results: HashMap<String, MPNonAuthoritative> = HashMap::new();
 
     for (name, electorate_name, id) in found {
 
         // Make a directory labelled with the electorate.
         let path = format!(
-            "{}/pics/{}/{}/",
+            "{}/{}/{}/{}/{}/",
             MP_SOURCE.to_string(),
+            TEMP_DIR.to_string(),
+            PICS_DIR.to_string(),
             Chamber::Australian_House_Of_Representatives,
             &electorate_name
         );
@@ -195,7 +217,7 @@ pub async fn get_photos_and_summaries(
             }
         }
         println!("Found MP {mp:?}");
-        results.push(mp);
+        results.insert(electorate_name, mp);
     }
     Ok(results)
 }
@@ -242,61 +264,67 @@ async fn get_image_info(filename: &str, client: &reqwest::Client) -> anyhow::Res
         filename.to_string().replace("\"", "")
     );
     let response = download_wikipedia_data(metadata_url.as_str(), client).await?;
-    let pages = response
+    let opt_pages = response
         .get("query")
-        .unwrap()
-        .get("pages")
-        .unwrap()
-        .as_object()
-        .unwrap();
+        .and_then(|q| q.get("pages"))
+        .and_then(|p| p.as_object());
 
     // There's only ever 1 page, but if there happened to be more we would miss them.
 
     // .get("entities")
     //    .and_then(|q| q.get(&id))
     //    .and_then(|i| i.get("sitelinks"))
-    let (_, page_data) = pages.iter().next().unwrap();
-    let image_info = &page_data.get("imageinfo").unwrap().as_array().unwrap()[0];
-    let image_metadata = image_info.get("extmetadata").unwrap();
-    let description = image_metadata
-        .get("ImageDescription")
-        .and_then(|d| d.get("value"))
-        .and_then(|v| v.as_str())
-        .map(|s| strip_quotes(s));
-    let artist = image_metadata
-        .get("Artist")
-        .and_then(|a| a.get("value"))
-        .and_then(|v| v.as_str())
-        .map(|s| strip_quotes(s));
-    // println!("found artist {} for {}", artist.unwrap_or(String::from("None")), filename);
-    let license_short: Option<String> = image_metadata
-        .get("LicenseShortName")
-        .and_then(|l| l.get("value"))
-        .and_then(|v| v.as_str())
-        .map(|s| strip_quotes(s));
 
-    // TODO We should probably check
-    // what the license actually is, e.g. whether AttributionRequired is true.
-    let license_url: Option<String> = image_metadata
-        .get("LicenseUrl")
-        .and_then(|l| l.get("value"))
-        .and_then(|v| v.as_str())
-        .map(|s| strip_quotes(s));
+    if let Some(pages) = opt_pages {
+        if let Some((_, page_data)) = pages.iter().next() {
+            let image_info = &page_data.get("imageinfo").unwrap().as_array().unwrap()[0];
+            let image_metadata = image_info.get("extmetadata").unwrap();
+            let description = image_metadata
+                .get("ImageDescription")
+                .and_then(|d| d.get("value"))
+                .and_then(|v| v.as_str())
+                .map(|s| strip_quotes(s));
+            let artist = image_metadata
+                .get("Artist")
+                .and_then(|a| a.get("value"))
+                .and_then(|v| v.as_str())
+                .map(|s| strip_quotes(s));
+            // println!("found artist {} for {}", artist.unwrap_or(String::from("None")), filename);
+            let license_short: Option<String> = image_metadata
+                .get("LicenseShortName")
+                .and_then(|l| l.get("value"))
+                .and_then(|v| v.as_str())
+                .map(|s| strip_quotes(s));
 
-    let url = image_info
-        .get("url")
-        .and_then(|u| u.as_str())
-        .map(|s| strip_quotes(s));
+            // TODO We should probably check
+            // what the license actually is, e.g. whether AttributionRequired is true.
+            let license_url: Option<String> = image_metadata
+                .get("LicenseUrl")
+                .and_then(|l| l.get("value"))
+                .and_then(|v| v.as_str())
+                .map(|s| strip_quotes(s));
 
-    // println!("found image url {} for {}", url, filename);
+            let url = image_info
+                .get("url")
+                .and_then(|u| u.as_str())
+                .map(|s| strip_quotes(s));
 
-    let info : ImageInfo = ImageInfo {
-        description,
-        filename: filename.to_string(),
-        artist,
-        source_url: url,
-        attribution_short_name: license_short,
-        attribution_url: license_url.clone(),
-    };
-    Ok(info)
-}
+            // println!("found image url {} for {}", url, filename);
+
+
+            let info: ImageInfo = ImageInfo {
+                description,
+                filename: filename.to_string(),
+                artist,
+                source_url: url,
+                attribution_short_name: license_short,
+                attribution_url: license_url.clone(),
+            };
+            Ok(info)
+        } else {
+            Err(anyhow!("Failed to get image info"))
+        } } else {
+            // TODO this is where the && for the if let... would work very nicely.
+            Err(anyhow!("Failed to get image info"))
+        }
+    }

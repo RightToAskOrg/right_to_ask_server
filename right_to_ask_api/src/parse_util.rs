@@ -47,7 +47,7 @@ pub(crate) async fn download_wikipedia_data(insecure_url:&str, client: &Client) 
 
 /// Download a single wikipedia file (with proper polite headers)
 /// So far suspiciously identical to download_wiki_data_to_file
-/// except for the URL
+/// except for the URL and the use of get instead of post.
 pub(crate) async fn download_wikipedia_file(insecure_url:&str, client: &Client) -> anyhow::Result<NamedTempFile> {
     let url = insecure_url.replace("http://", "https://");
     println!("Downloading wiki data to file from {}", &url);
@@ -151,8 +151,9 @@ mod tests {
         assert_eq!("\'Hi", strip_quotes("\'Hi"));         // Don't strip unmatched quotes
         assert_eq!("Hi\"", strip_quotes("Hi\""));         // "
         assert_eq!("H\"i\"", strip_quotes("H\"i\""));     // Don't strip quotes that aren't at the ends
+        assert_eq!("\'H\'\"i\"", strip_quotes("\'H\'\"i\""));  //  "
         assert_eq!("\"Hi\'", strip_quotes("\"Hi\'"));     // Don't strip quotes that don't match
-        assert_eq!("\"Hi\"", strip_quotes("\"\"Hi\"\"")); // Only stip the outer layer
+        assert_eq!("\"Hi\"", strip_quotes("\"\"Hi\"\"")); // Only strip the outer layer
         assert_eq!("\'Hi\'", strip_quotes("\"\'Hi\'\"")); // "
         assert_eq!("Hi\n", strip_quotes("\"Hi\n\""));     // Include newlines
         assert_eq!("Hi\n", strip_quotes("\'Hi\n\'"));     // "
