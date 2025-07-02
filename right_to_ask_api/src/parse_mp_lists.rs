@@ -672,7 +672,7 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     let wiki_data_file = get_house_reps_json(&client).await?;
     wiki_data_file.persist(dir.join("wiki.json"))?;
     println!("Persisted wiki data file");
-    //get_photos_and_summaries(dir.join("wiki.json").to_str().unwrap(), &client).await?;
+    get_photos_and_summaries(dir.join("wiki.json").to_str().unwrap(), &client).await?;
 
     // NSW
     let la = download_to_file("https://www.parliament.nsw.gov.au/_layouts/15/NSWParliament/memberlistservice.aspx?members=LA&format=Excel").await?;
