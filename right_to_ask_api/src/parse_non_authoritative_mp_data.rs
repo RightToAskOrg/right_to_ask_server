@@ -19,14 +19,16 @@ use std::fmt::Display;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
+use std::str::{from_boxed_utf8_unchecked, FromStr};
+use mysql_common::row::new_row;
 use tempfile::NamedTempFile;
 use toml::to_string;
 use url::form_urlencoded::byte_serialize;
 use crate::mp_non_authoritative::{ImageInfo, MPNonAuthoritative};
+use crate::parse_non_authoritative_mp_data::FileThatIsSomewhere::{Permanent, Temporary};
 
 pub const MP_SOURCE: &'static str = "data/MP_source";
-pub const TEMP_DIR: &'static str = "non_authoritative_data";
+pub const NON_AUTHORITATIVE_DIR: &'static str = "non_authoritative_data";
 pub const PICS_DIR: &'static str = "pics";
 
 const WIKIPEDIA_API_URL: &str = "https://www.wikidata.org/w/api.php?";
@@ -94,10 +96,47 @@ pub async fn process_non_authoritative_mp_data()
     todo!()
 }
 
+/// A temporary file that known where it should be persisted to.
+/// Use this for when one creates a temporary file that one will probably want to
+/// persist, but may not if it is corrupt.
+struct PersistableTempFile {
+    temp_file : NamedTempFile,
+    place_to_persist : String,
+}
+impl PersistableTempFile {
+    pub fn persist(self) -> anyhow::Result<()> {
+        self.temp_file.persist(self.place_to_persist)?;
+        Ok(())
+    }
+}
+enum FileThatIsSomewhere {
+    Temporary(PersistableTempFile),
+    Permanent(String),
+}
+
+impl FileThatIsSomewhere {
+    ///if given a client, download it to a temporary file from the url.
+    async fn get(url:&str,client:Option<&reqwest::Client>,permanent_address:String) -> anyhow::Result<FileThatIsSomewhere> {
+        if let Some(client) = client {
+            // download it to a temp file
+            let temp_file = download_wikipedia_file(url, client).await?;
+            Ok(Temporary(PersistableTempFile{temp_file, place_to_persist: permanent_address}))
+        } else {
+            Ok(Permanent(permanent_address))
+        }
+    }
+    fn persist_if_needed(self) -> anyhow::Result<()> {
+        match self {
+            Temporary(f) => f.persist(),
+            _ => Ok(())
+        }
+    }
+} 
 /// Download all the non-authoritative data.
+/// If the client is None, it does no downloading; if the client is present, it is used for downloads.
 pub async fn get_photos_and_summaries(
     json_file: &str,
-    client: &reqwest::Client,
+    opt_client: Option<&reqwest::Client>,
 ) -> anyhow::Result<HashMap<String, MPNonAuthoritative>> {
     println!("Getting photos and summaries - got json file {}", json_file);
     let found: Vec<(String, String, String)> = parse_wiki_data(File::open(json_file)?).await?;
@@ -105,21 +144,32 @@ pub async fn get_photos_and_summaries(
 
     for (name, electorate_name, id) in found {
 
-        // Make a directory labelled with the electorate.
-        let path = format!(
+        // Make a scratch directory labelled with the electorate.
+        let non_authoritative_path = format!(
             "{}/{}/{}/{}/{}/",
             MP_SOURCE.to_string(),
-            TEMP_DIR.to_string(),
+            NON_AUTHORITATIVE_DIR.to_string(),
             PICS_DIR.to_string(),
             Chamber::Australian_House_Of_Representatives,
             &electorate_name
         );
-        std::fs::create_dir_all(&path)?;
+        std::fs::create_dir_all(&non_authoritative_path)?;
+
+        // Make a directory labelled with the electorate, for storing image info
+        // intended for server upload.
+        let uploadable_path = format!(
+            "{}/{}/{}/{}/",
+            MP_SOURCE.to_string(),
+            PICS_DIR.to_string(),
+            Chamber::Australian_House_Of_Representatives,
+            &electorate_name
+        );
+        std::fs::create_dir_all(&uploadable_path)?;
 
         // Make the MP data structure into which all this info will be stored.
         let mut mp: MPNonAuthoritative
             = MPNonAuthoritative { name: name.clone(), electorate_name: electorate_name.clone(),
-                 path: path.clone(), ..Default::default() };
+                 path: uploadable_path.clone(), ..Default::default() };
 
         // Get the person's wikipedia title from their ID (this is usually their name but may have disambiguating
         // extra characters for common names)
@@ -134,8 +184,22 @@ pub async fn get_photos_and_summaries(
             &id
         );
         println!("Processing {}", &name);
-        let response = download_wikipedia_data(url.as_str(), client).await?;
-        let opt_title: Option<&str> = response
+
+        let entity_data_file = format!("{}/entity_data.json", &uploadable_path);
+        // If we have a client, use it to download the data and persist the result in the
+        // temp directory.
+        let (entity_file_path, entity_temp_file) =
+        if let Some(client)  = opt_client {
+            let temp_file = download_wikipedia_file(url.as_str(), client).await?;
+            (temp_file.path().to_path_buf(), Some(temp_file) )
+        } else {
+            (PathBuf::from(&entity_data_file), None) 
+        }; 
+        
+        let wikipedia_entity_data : Value = serde_json::from_reader(File::open(&entity_file_path)?)?;
+
+        // Parse the wikipedia entity data
+        let opt_title: Option<&str> = wikipedia_entity_data
             .get("entities")
             .and_then(|q| q.get(&id))
             .and_then(|i| i.get("sitelinks"))
@@ -198,7 +262,7 @@ pub async fn get_photos_and_summaries(
                         let img_data: ImageInfo = get_image_info(strip_quotes(filename_with_quotes.as_str()).as_str(), client).await?;
 
                         // Store the attribution in the appropriate directory, as a text file.
-                        store_attr_txt(&img_data, &path).await?;
+                        store_attr_txt(&img_data, &uploadable_path).await?;
 
                         // Then download the actual file
                         if let Some(img_url) = &img_data.source_url {
@@ -207,15 +271,22 @@ pub async fn get_photos_and_summaries(
                             let extn = &extn_regexp.captures(&img_url).unwrap()["extn"].to_string();
                             println!("Got image {} with extension {}", url, &extn);
                             let escaped_name = name.replace(" ", "_");
-                            let filepath = format!("{}/{}.{}", path, escaped_name, extn);
+                            let filepath = format!("{}/{}.{}", uploadable_path, escaped_name, extn);
                             tempfile.persist(&filepath)?;
                         }
 
                         mp.img_data = Some(img_data);
                     }
+                    
                 }
             }
         }
+        
+        // Persist data from first call.
+        if let Some(temp_file) = entity_temp_file {
+            temp_file.persist(&entity_data_file)?;
+        }
+
         println!("Found MP {mp:?}");
         results.insert(electorate_name, mp);
     }
