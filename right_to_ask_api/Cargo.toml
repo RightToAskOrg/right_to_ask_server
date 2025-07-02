@@ -18,8 +18,8 @@ mysql = "23.0"
 mysql_common = { version="0.29.1", features=["frunk"]}
 merkle-tree-bulletin-board-backend-mysql = "0.3"
 # If you want to use the library directly to test { path="../../bulletin-board/merkle-tree-bulletin-board-backend-mysql" }
-ed25519-dalek = { version="2.0", features=["pkcs8","pem"]}
-base64 = "0.21"
+ed25519-dalek = { version="2.1", features=["pkcs8","pem"]}
+base64 = "0.22"
 toml = "0.7"
 hex = "0.4"
 pkcs8 = {version = "0.10", features = ["alloc"] }
