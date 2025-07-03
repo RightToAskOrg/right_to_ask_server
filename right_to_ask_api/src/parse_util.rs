@@ -119,19 +119,6 @@ pub fn get_nested_json<'a>(json: &'a serde_json::Value,fields:&[&str]) -> Option
     else { None }
 }
 
-/// extracts as a string a nested json value, by getting each field in sequence.
-/// if strip_quotes is true, it applies strip_quotes before returning the string.
-pub fn extract_nested_json(json:&Value, fields: &Vec<String>, strip_quotes: bool) -> Option<String> {
-
-    todo!();
-    /*
-    for field in fields {
-        json.get(field).map(|v|{})
-    }
-     */
-
-}
-
 /// Strip a single pair of outer quotes, either '...' or "...", from a string, if present.
 pub fn strip_quotes(s: &str) -> String {
     let double_quote_regexp = Regex::new(r#"^"(?s)(.*)"$"#).unwrap();

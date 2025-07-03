@@ -1,17 +1,21 @@
 //! Parse various files from non-authoritative sources such as Wikipedia, to add to information
 //! derived in parse_mp-lists.
 //!
-use crate::parse_util::{download_wiki_data_to_file, download_wikipedia_file, get_nested_json, parse_wiki_data, strip_quotes};
+use crate::mp_non_authoritative::{ImageInfo, MPNonAuthoritative};
+use crate::parse_util::{
+    download_wiki_data_to_file, download_wikipedia_file, get_nested_json, parse_wiki_data,
+    strip_quotes,
+};
 use crate::regions::{Chamber, Electorate};
 use anyhow::anyhow;
+use itertools::assert_equal;
 use regex::Regex;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{Write};
-use itertools::assert_equal;
+use std::io::Write;
 use tempfile::NamedTempFile;
+use url::Url;
 use url::form_urlencoded::byte_serialize;
-use crate::mp_non_authoritative::{ImageInfo, MPNonAuthoritative};
 
 pub const MP_SOURCE: &'static str = "data/MP_source";
 pub const NON_AUTHORITATIVE_DIR: &'static str = "non_authoritative_data";
@@ -67,8 +71,7 @@ pub async fn get_house_reps_json(client: &reqwest::Client) -> anyhow::Result<Nam
 /// Returns name, district, summary and optional (path,filename) for downloaded picture,
 /// as a map from electorate name to the non-authoritative data about the MP.
 pub async fn process_non_authoritative_mp_data()
- -> anyhow::Result<HashMap<String, MPNonAuthoritative>> {
-
+-> anyhow::Result<HashMap<String, MPNonAuthoritative>> {
     // Make a directory labelled with the electorate.
     /*
     let path = format!(
@@ -86,8 +89,8 @@ pub async fn process_non_authoritative_mp_data()
 /// Use this for when one creates a temporary file that one will probably want to
 /// persist, but may not if it is corrupt.
 struct PersistableTempFile {
-    temp_file : NamedTempFile,
-    place_to_persist : String,
+    temp_file: NamedTempFile,
+    place_to_persist: String,
 }
 impl PersistableTempFile {
     pub fn persist(self) -> anyhow::Result<()> {
@@ -105,11 +108,18 @@ enum FileThatIsSomewhere {
 impl FileThatIsSomewhere {
     /// if given a client, download it to a temporary file from the url, making capable of saving to the permanent_address
     /// Otherwise assume it is at the permanent address and disregard the url.
-    async fn get(url:&str,client:Option<&reqwest::Client>,permanent_address:String) -> anyhow::Result<FileThatIsSomewhere> {
+    async fn get(
+        url: &str,
+        client: Option<&reqwest::Client>,
+        permanent_address: String,
+    ) -> anyhow::Result<FileThatIsSomewhere> {
         if let Some(client) = client {
             // download it to a temp file
             let temp_file = download_wikipedia_file(url, client).await?;
-            Ok(FileThatIsSomewhere::Temporary(PersistableTempFile{temp_file, place_to_persist: permanent_address}))
+            Ok(FileThatIsSomewhere::Temporary(PersistableTempFile {
+                temp_file,
+                place_to_persist: permanent_address,
+            }))
         } else {
             Ok(FileThatIsSomewhere::Permanent(permanent_address))
         }
@@ -117,7 +127,7 @@ impl FileThatIsSomewhere {
     fn persist_if_needed(self) -> anyhow::Result<()> {
         match self {
             FileThatIsSomewhere::Temporary(f) => f.persist(),
-            _ => Ok(())
+            _ => Ok(()),
         }
     }
     fn as_json(&self) -> anyhow::Result<serde_json::Value> {
@@ -138,7 +148,6 @@ pub async fn get_photos_and_summaries(
     let mut results: HashMap<Electorate, MPNonAuthoritative> = HashMap::new();
 
     for (name, electorate_name, id) in found {
-
         // Make a directory labelled with the electorate for data that will be used to find the picture, but not used after creating MPs.json.
         let non_authoritative_path = format!(
             "{}/{}/{}/{}/{}/",
@@ -162,9 +171,12 @@ pub async fn get_photos_and_summaries(
         std::fs::create_dir_all(&uploadable_path)?;
 
         // Make the MP data structure into which all this info will be stored.
-        let mut mp: MPNonAuthoritative
-            = MPNonAuthoritative { name: name.clone(), electorate_name: electorate_name.clone(),
-                 path: uploadable_path.clone(), ..Default::default() };
+        let mut mp: MPNonAuthoritative = MPNonAuthoritative {
+            name: name.clone(),
+            electorate_name: electorate_name.clone(),
+            path: uploadable_path.clone(),
+            ..Default::default()
+        };
 
         // Get the person's wikipedia title from their ID (this is usually their name but may have disambiguating
         // extra characters for common names)
@@ -174,16 +186,20 @@ pub async fn get_photos_and_summaries(
         // But just doing one for now.
         let url = format!(
             "{}{}{}",
-            WIKIPEDIA_API_URL,
-            WIKIPEDIA_SITE_LINKS_REQUEST,
-            &id
+            WIKIPEDIA_API_URL, WIKIPEDIA_SITE_LINKS_REQUEST, &id
         );
         println!("Processing {}", &name);
-        
-        let entity_file = FileThatIsSomewhere::get(&url,opt_client,format!("{non_authoritative_path}/entity.json")).await?;
-        let wikipedia_entity_data : serde_json::Value = entity_file.as_json()?;
+
+        let entity_file = FileThatIsSomewhere::get(
+            &url,
+            opt_client,
+            format!("{non_authoritative_path}/entity.json"),
+        )
+        .await?;
+        let wikipedia_entity_data: serde_json::Value = entity_file.as_json()?;
 
         // Parse the wikipedia entity data
+        // TODO can delete
         let opt_title: Option<&str> = wikipedia_entity_data
             .get("entities")
             .and_then(|q| q.get(&id))
@@ -191,15 +207,18 @@ pub async fn get_photos_and_summaries(
             .and_then(|s| s.get("enwiki"))
             .and_then(|s| s.get("title"))
             .and_then(|i| i.as_str());
-        let opt_title_new : Option<&str> = get_nested_json(&wikipedia_entity_data,&[&id,"sitelinks","enwiki","title"]);
-        assert_equal(opt_title_new, opt_title); // TODO should be able to just use opt_title_new
+        let opt_title_new: Option<&str> = get_nested_json(
+            &wikipedia_entity_data,
+            &["entities", &id, "sitelinks", "enwiki", "title"],
+        );
+        // assert_equal(opt_title_new, opt_title); // TODO should be able to just use opt_title_new
         println!(
             "found title {} for url {}",
-            opt_title.unwrap_or("NONE"),
+            opt_title_new.unwrap_or("NONE"),
             url
         );
 
-        if let Some(title) = opt_title {
+        if let Some(title) = opt_title_new {
             // Now get their summary & image info using their title.
             // Again, we could pipe the titles.
             // "https://en.wikipedia.org/w/api.php?action=query&prop=extracts|pageimages&exintro=&exsentences=2&explaintext=&redirects=&format=json&titles=Ali%20France";
@@ -211,10 +230,16 @@ pub async fn get_photos_and_summaries(
                 "{}{}{}",
                 EN_WIKIPEDIA_API_URL,
                 WIKIPEDIA_EXTRACT_AND_IMAGES_REQUEST,
-                percent_encoded_title
+                // percent_encoded_title
+                encoded_title
             );
-            
-            let summary_file = FileThatIsSomewhere::get(&summary_url,opt_client,format!("{non_authoritative_path}/summary.json")).await?;
+
+            let summary_file = FileThatIsSomewhere::get(
+                &summary_url,
+                opt_client,
+                format!("{non_authoritative_path}/summary.json"),
+            )
+            .await?;
             let response = summary_file.as_json()?;
             // let mut image_name: Option<&Value> = None;
             // There's actually only one page number per page (I think), but since we don't know what they are,
@@ -226,23 +251,22 @@ pub async fn get_photos_and_summaries(
             // There's only ever 1 page, so just get the first one (but if there happened to be more we would miss them).
             if let Some(pages) = opt_pages {
                 if let Some((page_id, page_data)) = pages.iter().next() {
-
                     // Add the wikipedia page as a link.
-                    mp.links.insert(String::from("wikipedia"),
-                                 format!("{}{}", WIKIPEDIA_PAGE_FROM_ID, page_id));
+                    mp.links.insert(
+                        String::from("wikipedia"),
+                        format!("{}{}", WIKIPEDIA_PAGE_FROM_ID, page_id),
+                    );
 
                     // Add the wikipedia summary.
                     mp.wikipedia_summary = page_data
                         .get("extract")
                         .and_then(|s| s.as_str())
                         .map(|s| strip_quotes(s));
-                    let image_name = page_data.get("pageimage").map(|s| s.to_string().replace("\"",""));
+                    let image_name = page_data
+                        .get("pageimage")
+                        .map(|s| s.to_string().replace("\"", ""));
                     if !image_name.is_none() {
-                        println!(
-                            "found image name {:?} for {}",
-                            image_name.as_ref(),
-                            title
-                        );
+                        println!("found image name {:?} for {}", image_name.as_ref(), title);
                     }
 
                     if let Some(filename_with_quotes) = image_name {
@@ -252,38 +276,48 @@ pub async fn get_photos_and_summaries(
                             // Get rid of "
                             filename.replace("\"", "")
                         );
-                        let image_metadata_file = FileThatIsSomewhere::get(&image_metadata_url,opt_client,format!("{non_authoritative_path}/image_metadata.json")).await?;
+                        let image_metadata_file = FileThatIsSomewhere::get(
+                            &image_metadata_url,
+                            opt_client,
+                            format!("{non_authoritative_path}/image_metadata.json"),
+                        )
+                        .await?;
 
                         // First get the image metadata
-                        let img_data: ImageInfo = parse_image_info(&filename,image_metadata_file.as_json()?)?;
+                        if let Some(img_data) =
+                            parse_image_info(title, image_metadata_file.as_json()?)
+                        {
+                            // Store the attribution in the appropriate directory, as a text file.
+                            store_attr_txt(&img_data, &uploadable_path).await?;
 
-                        // Store the attribution in the appropriate directory, as a text file.
-                        store_attr_txt(&img_data, &uploadable_path).await?;
-
-                        // Then download the actual file
-                        if let Some(img_url) = &img_data.source_url {
-                            let extn_regexp = Regex::new(r".(?<extn>\w+)$").unwrap();
-                            let extn = &extn_regexp.captures(&img_url).unwrap()["extn"].to_string();
-                            println!("Got image {} with extension {}", url, &extn);
-                            let escaped_name = name.replace(" ", "_");
-                            // FIXME: This file name seems decoupled from the file name in img_data. Why not just use it instead of {escaped_name}.{extn}? Or else why not store this filename in img_data.filename?
-                            let image_file = FileThatIsSomewhere::get(&img_url,opt_client,format!("{uploadable_path}/{escaped_name}.{extn}")).await?;
+                            // Then download the actual file
+                            let image_file = FileThatIsSomewhere::get(
+                                &img_data.source_url.as_ref().unwrap(),
+                                opt_client,
+                                format!("{uploadable_path}/{}", img_data.filename),
+                            )
+                            .await?;
                             image_file.persist_if_needed()?;
+
+                            mp.img_data = Some(img_data);
+                            image_metadata_file.persist_if_needed()?;
                         }
-
-                        mp.img_data = Some(img_data);
-                        image_metadata_file.persist_if_needed()?;
                     }
-
                 }
             }
             summary_file.persist_if_needed()?;
         }
 
         entity_file.persist_if_needed()?;
-        
+
         println!("Found MP {mp:?}");
-        results.insert(Electorate{ chamber: Chamber::Australian_House_Of_Representatives, region: Some(electorate_name) }, mp);
+        results.insert(
+            Electorate {
+                chamber: Chamber::Australian_House_Of_Representatives,
+                region: Some(electorate_name),
+            },
+            mp,
+        );
     }
     Ok(results)
 }
@@ -294,11 +328,11 @@ async fn store_attr_txt(img_data: &ImageInfo, path: &String) -> anyhow::Result<F
     std::fs::create_dir_all(crate::parse_util::TEMP_DIR)?;
     let mut attribution_file = NamedTempFile::new_in(crate::parse_util::TEMP_DIR)?;
     const UNKNOWN: &str = "Unknown";
-    let short_name : String = match &img_data.attribution_short_name {
+    let short_name: String = match &img_data.attribution_short_name {
         Some(name) => name.to_string(),
         None => UNKNOWN.to_string(),
     };
-    let artist : String = match &img_data.artist {
+    let artist: String = match &img_data.artist {
         Some(name) => name.to_string(),
         None => UNKNOWN.to_string(),
     };
@@ -306,11 +340,7 @@ async fn store_attr_txt(img_data: &ImageInfo, path: &String) -> anyhow::Result<F
         "Artist: {}. License: {} via Wikimedia Commons.\n",
         artist,
         if let Some(attribution_url) = &img_data.attribution_url {
-            format!(
-                "<A href={}>{}</A>",
-                attribution_url,
-                short_name
-            )
+            format!("{} {}", short_name, attribution_url)
         } else {
             short_name
         }
@@ -322,8 +352,7 @@ async fn store_attr_txt(img_data: &ImageInfo, path: &String) -> anyhow::Result<F
 }
 
 /// parse image metadata
-fn parse_image_info(filename: &str, json:serde_json::Value) -> anyhow::Result<ImageInfo> {
-
+fn parse_image_info(title: &str, json: serde_json::Value) -> Option<ImageInfo> {
     let opt_pages = json
         .get("query")
         .and_then(|q| q.get("pages"))
@@ -364,27 +393,26 @@ fn parse_image_info(filename: &str, json:serde_json::Value) -> anyhow::Result<Im
                 .and_then(|v| v.as_str())
                 .map(|s| strip_quotes(s));
 
-            let url = image_info
+            if let Some(url) = image_info
                 .get("url")
                 .and_then(|u| u.as_str())
-                .map(|s| strip_quotes(s));
+                .map(|s| strip_quotes(s)) {
 
-            // println!("found image url {} for {}", url, filename);
+                if let Some(ext_pos) = url.rfind('.') {
+                    let filename = format!("{}{}", title, &url[ext_pos..]);
 
-
-            let info: ImageInfo = ImageInfo {
-                description,
-                filename: filename.to_string(),
-                artist,
-                source_url: url,
-                attribution_short_name: license_short,
-                attribution_url: license_url,
-            };
-            Ok(info)
-        } else {
-            Err(anyhow!("Failed to get image info"))
-        } } else {
-            // TODO this is where the && for the if let... would work very nicely.
-            Err(anyhow!("Failed to get image info"))
+                    let info: ImageInfo = ImageInfo {
+                        description,
+                        filename,
+                        artist,
+                        source_url: Some(url),
+                        attribution_short_name: license_short,
+                        attribution_url: license_url,
+                    };
+                    return Some(info);
+                }
+            }
         }
     }
+    None
+}
