@@ -7,14 +7,10 @@ use crate::parse_util::{
     strip_quotes,
 };
 use crate::regions::{Chamber, Electorate};
-use anyhow::anyhow;
-use itertools::assert_equal;
-use regex::Regex;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use tempfile::NamedTempFile;
-use url::Url;
 use url::form_urlencoded::byte_serialize;
 
 pub const MP_SOURCE: &'static str = "data/MP_source";
@@ -66,23 +62,6 @@ pub async fn get_house_reps_json(client: &reqwest::Client) -> anyhow::Result<Nam
     let file: NamedTempFile = download_wiki_data_to_file(&*query_string, &client).await?;
     // let raw_data : serde_json::Value = serde_json::from_reader(&file)?;
     Ok(file)
-}
-
-/// Returns name, district, summary and optional (path,filename) for downloaded picture,
-/// as a map from electorate name to the non-authoritative data about the MP.
-pub async fn process_non_authoritative_mp_data()
--> anyhow::Result<HashMap<String, MPNonAuthoritative>> {
-    // Make a directory labelled with the electorate.
-    /*
-    let path = format!(
-        "{}/pics/{}/{}/",
-        MP_SOURCE.to_string(),
-        Chamber::Australian_House_Of_Representatives,
-        &electorate_name
-    );
-    std::fs::create_dir_all(&path)?;
-    */
-    todo!()
 }
 
 /// A temporary file that known where it should be persisted to.
@@ -199,19 +178,10 @@ pub async fn get_photos_and_summaries(
         let wikipedia_entity_data: serde_json::Value = entity_file.as_json()?;
 
         // Parse the wikipedia entity data
-        // TODO can delete
-        let opt_title: Option<&str> = wikipedia_entity_data
-            .get("entities")
-            .and_then(|q| q.get(&id))
-            .and_then(|i| i.get("sitelinks"))
-            .and_then(|s| s.get("enwiki"))
-            .and_then(|s| s.get("title"))
-            .and_then(|i| i.as_str());
         let opt_title_new: Option<&str> = get_nested_json(
             &wikipedia_entity_data,
             &["entities", &id, "sitelinks", "enwiki", "title"],
         );
-        // assert_equal(opt_title_new, opt_title); // TODO should be able to just use opt_title_new
         println!(
             "found title {} for url {}",
             opt_title_new.unwrap_or("NONE"),
@@ -223,9 +193,6 @@ pub async fn get_photos_and_summaries(
             // Again, we could pipe the titles.
             // "https://en.wikipedia.org/w/api.php?action=query&prop=extracts|pageimages&exintro=&exsentences=2&explaintext=&redirects=&format=json&titles=Ali%20France";
             let encoded_title: String = byte_serialize(title.as_bytes()).collect();
-            // FIXME I do not understand why I need to do this.
-            let percent_encoded_title = encoded_title.replace("+", "%20");
-            // mp.wikipedia_title = Some(title.to_string());
             let summary_url: String = format!(
                 "{}{}{}",
                 EN_WIKIPEDIA_API_URL,

@@ -3,7 +3,6 @@
 use std::fs::File;
 use std::io::Write;
 use anyhow::anyhow;
-use mysql_common::frunk::labelled::chars::f;
 use regex::Regex;
 use reqwest::Client;
 use tempfile::NamedTempFile;
@@ -25,24 +24,6 @@ pub(crate) async fn download_to_file(url:&str) -> anyhow::Result<NamedTempFile> 
     file.write_all(&content)?;
     file.flush()?;
     Ok(file)
-}
-
-
-/// Download a single wikipedia file (with proper polite headers)
-/// and return as a json value
-pub(crate) async fn download_wikipedia_data(insecure_url:&str, client: &Client) -> anyhow::Result<Value> {
-    let url = insecure_url.replace("http://", "https://");
-    println!("Downloading wiki data from {}", &url);
-    let mut headers = HeaderMap::new();
-    headers.insert(USER_AGENT, DD_USER_AGENT.parse().unwrap());
-    headers.insert(ACCEPT, "application/json".parse().unwrap());
-    headers.insert(CONTENT_TYPE, "application/sparql-query".parse().unwrap());
-    let response = client.get(url)
-        .headers(headers)
-        .send()
-        .await?;
-    let content = response.json().await?;
-    Ok(content)
 }
 
 /// Download a single wikipedia file (with proper polite headers)
@@ -73,9 +54,9 @@ pub(crate) async fn download_wiki_data_to_file(query:&str, client: &Client) -> a
     std::fs::create_dir_all(TEMP_DIR)?;
     let mut file = NamedTempFile::new_in(TEMP_DIR)?;
     let mut headers = HeaderMap::new();
-    headers.insert(USER_AGENT, DD_USER_AGENT.parse().unwrap());
-    headers.insert(ACCEPT, "application/json".parse().unwrap());
-    headers.insert(CONTENT_TYPE, "application/sparql-query".parse().unwrap());
+    headers.insert(USER_AGENT, DD_USER_AGENT.parse()?);
+    headers.insert(ACCEPT, "application/json".parse()?);
+    headers.insert(CONTENT_TYPE, "application/sparql-query".parse()?);
     let response = client.post(WIKI_DATA_BASE_URL)
         .headers(headers)
         .body(query.to_string())
@@ -88,6 +69,7 @@ pub(crate) async fn download_wiki_data_to_file(query:&str, client: &Client) -> a
 }
 
 /// Read the json data stored in file; return a tuple of Name, district, ID
+/// TODO Use get_nested_json.
 pub async  fn parse_wiki_data(file: File) -> anyhow::Result<Vec<(String, String, String)>> {
     let mut mps_data : Vec<(String, String, String)> = Vec::new();
     let raw : Value = serde_json::from_reader(file)?;
