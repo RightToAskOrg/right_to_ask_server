@@ -31,36 +31,24 @@ const WIKIPEDIA_PAGE_FROM_ID: &str = "https://en.wikipedia.org/?curid=";
 /// TODO: Think about how this should be structured for multiple chambers. Possibly we just want one
 /// function and one big .json file with all the data for each chamber, or possibly we want to pass
 /// the chamber into the function.
-/// Also we don't use these images, so we can delete that bit.
 pub async fn get_house_reps_json(client: &reqwest::Client) -> anyhow::Result<NamedTempFile> {
-    let query_string = concat!(
-        // "#Current members of the Australian House of Representatives with electorate, party, picture and date they assumed office\n" ,
-        "SELECT ?mp ?mpLabel ?districtLabel ?partyLabel ?assumedOffice (sample(?image) as ?image) where {\n",
-        "  # Get all mps\n",
-        "  ?mp p:P39 ?posheld; # With position held\n",
-        "           p:P102 ?partystatement. # And with a certain party\n",
-        "\n",
-        "  # Get the party\n",
-        "  ?partystatement ps:P102 ?party.\n",
-        "  MINUS { ?partystatement pq:P582 ?partyEnd. } # but minus the ones the mp is no longer a member of\n",
-        "  MINUS { ?party wdt:P361 ?partOf. } # and the 'Minnesota Democratic–Farmer–Labor Party' and such\n",
-        "\n",
-        "  # Check on the position \n",
-        "  ?posheld ps:P39 wd:Q18912794; # Position held is in the Australian house of reps\n",
-        "           pq:P768 ?district;\n",
-        "           pq:P580 ?assumedOffice. # And should have a starttime\n",
-        "\n",
-        "  MINUS { ?posheld pq:P582 ?endTime. } # But not an endtime\n",
-        "\n",
-        "  # Add an image\n",
-        "  OPTIONAL { ?mp wdt:P18 ?image. }\n",
-        "\n",
-        "  SERVICE wikibase:label { bd:serviceParam wikibase:language \"[AUTO_LANGUAGE],mul,en\". }\n",
-        "} GROUP BY ?mp ?mpLabel ?districtLabel ?partyLabel ?assumedOffice ORDER BY ?mpLabel",
-        // " &format=json"
+    let house_of_reps_code = "Q18912794";
+    let query_string = format!("{}{}{}{}{}{}{}{}{}{}{}{}",
+"       SELECT ?mp ?mpLabel ?districtLabel ?assumedOffice where {",
+"    ?mp p:P39 ?posheld.",    // # Check on the position
+"    ?posheld ps:P39 wd:", //# Position held is in the Australian house of reps
+       house_of_reps_code, // This is the only part specific to the house of reps
+"            ; pq:P768 ?district;",
+"             pq:P580 ?assumedOffice.", // # And should have a starttime
+"    MINUS { ?posheld pq:P582 ?endTime. }", // # But not an endtime
+"    SERVICE wikibase:label { bd:serviceParam wikibase:language \"[AUTO_LANGUAGE],mul,en\". }",
+"}",
+" GROUP BY ?mp ?mpLabel ?districtLabel ?assumedOffice",
+" ORDER BY ?mpLabel",
+" LIMIT 180"  // Should be large enough to guarantee no Australian parliament has more members.
     );
+ 
     let file: NamedTempFile = download_wiki_data_to_file(&*query_string, &client).await?;
-    // let raw_data : serde_json::Value = serde_json::from_reader(&file)?;
     Ok(file)
 }
 
@@ -119,7 +107,7 @@ impl FileThatIsSomewhere {
 /// Download all the non-authoritative data.
 /// If the client is None, it does no downloading; if the client is present, it is used for downloads.
 pub async fn get_photos_and_summaries(
-    json_file: &str,
+    json_file: &str, //FIXME could pass a chamber here.
     opt_client: Option<&reqwest::Client>,
 ) -> anyhow::Result<HashMap<Electorate, MPNonAuthoritative>> {
     println!("Getting photos and summaries - got json file {}", json_file);
@@ -133,7 +121,7 @@ pub async fn get_photos_and_summaries(
             MP_SOURCE.to_string(),
             NON_AUTHORITATIVE_DIR.to_string(),
             PICS_DIR.to_string(),
-            Chamber::Australian_House_Of_Representatives,
+            Chamber::Australian_House_Of_Representatives, //FIXME and use it here.
             &electorate_name
         );
         std::fs::create_dir_all(&non_authoritative_path)?;
@@ -149,11 +137,17 @@ pub async fn get_photos_and_summaries(
         );
         std::fs::create_dir_all(&uploadable_path)?;
 
+        // FIXME - clean this up and make the different names for directories cleaner.
         // Make the MP data structure into which all this info will be stored.
         let mut mp: MPNonAuthoritative = MPNonAuthoritative {
             name: name.clone(),
             electorate_name: electorate_name.clone(),
-            path: uploadable_path.clone(),
+            path: format!(
+                "{}/{}/{}/",
+                PICS_DIR,
+                Chamber::Australian_House_Of_Representatives,
+                &electorate_name
+            ),
             ..Default::default()
         };
 
