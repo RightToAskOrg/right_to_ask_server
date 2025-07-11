@@ -27,17 +27,33 @@ const WIKIPEDIA_IMAGE_INFO_REQUEST: &str =
 // How to get a wikipedia page link from a pageID.
 const WIKIPEDIA_PAGE_FROM_ID: &str = "https://en.wikipedia.org/?curid=";
 
-/// Get wikidata download for all the house of reps MPs.
-/// TODO: Think about how this should be structured for multiple chambers. Possibly we just want one
-/// function and one big .json file with all the data for each chamber, or possibly we want to pass
-/// the chamber into the function.
-pub async fn get_house_reps_json(client: &reqwest::Client) -> anyhow::Result<NamedTempFile> {
-    let house_of_reps_code = "Q18912794";
+fn wiki_data_code(chamber: &Chamber) -> String {
+    match chamber {
+        Chamber::Australian_House_Of_Representatives => "Q18912794".to_string(),
+        Chamber::Australian_Senate                   => "Q6814428".to_string(),
+        Chamber::ACT_Legislative_Assembly            => "Q6814365".to_string(),
+        Chamber::NSW_Legislative_Assembly            => "Q19202748".to_string(),
+        Chamber::NSW_Legislative_Council             => "Q18810377".to_string(),
+        Chamber::NT_Legislative_Assembly             => "Q26998278".to_string(),
+        Chamber::Qld_Legislative_Assembly            => "Q18526194".to_string(),
+        Chamber::SA_House_Of_Assembly                => "Q18220900".to_string(),
+        Chamber::SA_Legislative_Council              => "Q18662245".to_string(),
+        Chamber::Tas_House_Of_Assembly               => "Q19007285".to_string(),
+        Chamber::Tas_Legislative_Council             => "Q19299542".to_string(),
+        Chamber::Vic_Legislative_Assembly            => "Q18534408".to_string(),
+        Chamber::Vic_Legislative_Council             => "Q19185341".to_string(),
+        Chamber::WA_Legislative_Assembly             => "Q20165902".to_string(),
+        Chamber::WA_Legislative_Council              => "Q19627913".to_string()
+    }
+}
+
+/// Get wikidata download for all the MPs in the given chamber.
+pub async fn get_wikidata_json(client: &reqwest::Client, chamber: Chamber) -> anyhow::Result<NamedTempFile> {
     let query_string = format!("{}{}{}{}{}{}{}{}{}{}{}{}",
 "       SELECT ?mp ?mpLabel ?districtLabel ?assumedOffice where {",
 "    ?mp p:P39 ?posheld.",    // # Check on the position
-"    ?posheld ps:P39 wd:", //# Position held is in the Australian house of reps
-       house_of_reps_code, // This is the only part specific to the house of reps
+"    ?posheld ps:P39 wd:", //# Position held 
+        wiki_data_code(&chamber),
 "            ; pq:P768 ?district;",
 "             pq:P580 ?assumedOffice.", // # And should have a starttime
 "    MINUS { ?posheld pq:P582 ?endTime. }", // # But not an endtime
@@ -107,7 +123,7 @@ impl FileThatIsSomewhere {
 /// Download all the non-authoritative data.
 /// If the client is None, it does no downloading; if the client is present, it is used for downloads.
 pub async fn get_photos_and_summaries(
-    json_file: &str, //FIXME could pass a chamber here.
+    json_file: &str, chamber: Chamber,
     opt_client: Option<&reqwest::Client>,
 ) -> anyhow::Result<HashMap<Electorate, MPNonAuthoritative>> {
     println!("Getting photos and summaries - got json file {}", json_file);
@@ -121,7 +137,7 @@ pub async fn get_photos_and_summaries(
             MP_SOURCE.to_string(),
             NON_AUTHORITATIVE_DIR.to_string(),
             PICS_DIR.to_string(),
-            Chamber::Australian_House_Of_Representatives, //FIXME and use it here.
+            chamber,
             &electorate_name
         );
         std::fs::create_dir_all(&non_authoritative_path)?;
@@ -132,20 +148,21 @@ pub async fn get_photos_and_summaries(
             "{}/{}/{}/{}/",
             MP_SOURCE,
             PICS_DIR,
-            Chamber::Australian_House_Of_Representatives,
+            chamber,
             &electorate_name
         );
         std::fs::create_dir_all(&uploadable_path)?;
 
         // FIXME - clean this up and make the different names for directories cleaner.
         // Make the MP data structure into which all this info will be stored.
+        // Note that not all chambers have individual electorates.
         let mut mp: MPNonAuthoritative = MPNonAuthoritative {
             name: name.clone(),
             electorate_name: electorate_name.clone(),
             path: format!(
                 "{}/{}/{}/",
                 PICS_DIR,
-                Chamber::Australian_House_Of_Representatives,
+                chamber,
                 &electorate_name
             ),
             ..Default::default()

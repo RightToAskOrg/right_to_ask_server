@@ -17,7 +17,7 @@ use std::path::{PathBuf, Path};
 use std::fs::File;
 use crate::mp::{MP, MPSpec};
 use crate::regions::{Electorate, Chamber, State, RegionContainingOtherRegions};
-use crate::parse_non_authoritative_mp_data::{get_house_reps_json, get_photos_and_summaries};
+use crate::parse_non_authoritative_mp_data::{get_wikidata_json, get_photos_and_summaries};
 use std::str::FromStr;
 use anyhow::anyhow;
 use std::collections::{HashMap, HashSet};
@@ -32,6 +32,7 @@ use encoding_rs_io::DecodeReaderBytesBuilder;
 use crate::parse_util::{download_to_file};
 
 pub const MP_SOURCE : &'static str = "data/MP_source";
+const WIKIDATA_SUFFIX : &'static str = "_wikidata.json";
 
 fn parse_australian_senate(file : File) -> anyhow::Result<Vec<MP>> {
     let transcoded = DecodeReaderBytesBuilder::new().encoding(Some(encoding_rs::WINDOWS_1252)).build(file);
@@ -664,10 +665,11 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     // Attempt to get pictures & summaries from Wikipedia
     // The data file contains IDs for each MP, and links to each jpg
     let client = reqwest::Client::new();
-    let wiki_data_file = get_house_reps_json(&client).await?;
-    wiki_data_file.persist(dir.join("wiki.json"))?;
+    let wiki_data_file = get_wikidata_json(&client, Chamber::Australian_House_Of_Representatives).await?;
+    let wiki_data_file_path = dir.join(Chamber::Australian_House_Of_Representatives.to_string() + WIKIDATA_SUFFIX);
+    wiki_data_file.persist(&wiki_data_file_path)?;
     println!("Persisted wiki data file");
-    get_photos_and_summaries(dir.join("wiki.json").to_str().unwrap(), Some(&client)).await?;
+    get_photos_and_summaries(wiki_data_file_path.to_str().unwrap(), Chamber::Australian_House_Of_Representatives, Some(&client)).await?;
 
     // NSW
     let la = download_to_file("https://www.parliament.nsw.gov.au/_layouts/15/NSWParliament/memberlistservice.aspx?members=LA&format=Excel").await?;
@@ -775,7 +777,12 @@ pub async fn create_mp_list() -> anyhow::Result<()> {
         println!("Found {} in the WA Legislative Council",found.len());
         mps.extend(found);
     }
-    let mut non_authoritative= get_photos_and_summaries(dir.join("wiki.json").to_str().unwrap(), None).await?;
+    // FIXME currently just doing APH; possibly we could thread the map through successive calls to get_photos_and_summaries.
+
+    let mut non_authoritative= get_photos_and_summaries(
+        dir.join(Chamber::Australian_House_Of_Representatives.to_string() + WIKIDATA_SUFFIX).to_str().unwrap(),
+        Chamber::Australian_House_Of_Representatives,
+        None).await?;
     for mp in &mut mps {
         if let Some(data) = non_authoritative.remove(&mp.electorate) {
             mp.non_authoritative = Some(data);
