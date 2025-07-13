@@ -40,6 +40,15 @@ impl TryFrom<&str> for State {
 			b"TAS" => Ok(State::TAS),
 			b"VIC" => Ok(State::VIC),
 			b"WA" => Ok(State::WA),
+			// FIXME VT: Check this doesn't break something else
+			b"AUSTRALIAN CAPITAL TERRITORY" => Ok(State::ACT),
+			b"NEW SOUTH WALES" => Ok(State::NSW),
+			b"NORTHERN TERRITORY" => Ok(State::NT),
+			b"QUEENSLAND" => Ok(State::QLD),
+			b"SOUTH AUSTRALIA" => Ok(State::SA),
+			b"TASMANIA" => Ok(State::TAS),
+			b"VICTORIA" => Ok(State::VIC),
+			b"WESTERN AUSTRALIA" => Ok(State::WA),
 			_ => Err(anyhow!("Invalid state {}",value)),
 		}
 	}

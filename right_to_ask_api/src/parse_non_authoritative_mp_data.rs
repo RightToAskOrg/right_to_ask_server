@@ -6,7 +6,7 @@ use crate::parse_util::{
     download_wiki_data_to_file, download_wikipedia_file, get_nested_json, parse_wiki_data,
     strip_quotes,
 };
-use crate::regions::{Chamber, Electorate};
+use crate::regions::{Chamber, Electorate, State};
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::Write;
@@ -156,6 +156,7 @@ pub async fn get_photos_and_summaries(
         // FIXME - clean this up and make the different names for directories cleaner.
         // Make the MP data structure into which all this info will be stored.
         // Note that not all chambers have individual electorates.
+        let electorate_name = canonicalise_electorate_name(chamber, &electorate_name)?;
         let mut mp: MPNonAuthoritative = MPNonAuthoritative {
             name: name.clone(),
             electorate_name: electorate_name.clone(),
@@ -310,6 +311,18 @@ pub async fn get_photos_and_summaries(
             .push(mp); 
     }
     Ok(results)
+}
+
+/// Deal with possible discrepancies between wikipedia region names and authoritative ones.
+/// For the senate, change the full state/territory name to its 2-3 char short name.
+/// We may at some point have a problem with capitalisation for electorate names, but for the 
+/// moment we don't.
+/// TODO deal appropriately with chambers that don't have a region, e.g. NSW/SA Legislative Council.
+fn canonicalise_electorate_name(chamber: Chamber, region: &str) -> anyhow::Result<String> {
+    match chamber {
+        Chamber::Australian_Senate => Ok(State::try_from(region.to_uppercase().as_str())?.to_string()),
+        _ => Ok(region.to_string()),
+    }
 }
 
 /// Store a pretty-printed text file with the attribution info, into the directory in which the
