@@ -7,7 +7,7 @@ use crate::parse_util::{
     strip_quotes,
 };
 use crate::regions::{Chamber, Electorate};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::Write;
 use tempfile::NamedTempFile;
@@ -125,10 +125,10 @@ impl FileThatIsSomewhere {
 pub async fn get_photos_and_summaries(
     json_file: &str, chamber: Chamber,
     opt_client: Option<&reqwest::Client>,
-) -> anyhow::Result<HashMap<Electorate, MPNonAuthoritative>> {
+) -> anyhow::Result<HashMap<Electorate, Vec<MPNonAuthoritative>>> {
     println!("Getting photos and summaries - got json file {}", json_file);
     let found: Vec<(String, String, String)> = parse_wiki_data(File::open(json_file)?).await?;
-    let mut results: HashMap<Electorate, MPNonAuthoritative> = HashMap::new();
+    let mut results: HashMap<Electorate, Vec<MPNonAuthoritative>> = HashMap::new();
 
     for (name, electorate_name, id) in found {
         // Make a directory labelled with the electorate for data that will be used to find the picture, but not used after creating MPs.json.
@@ -183,9 +183,8 @@ pub async fn get_photos_and_summaries(
         let entity_file = FileThatIsSomewhere::get(
             &url,
             opt_client,
-            format!("{non_authoritative_path}/entity.json"),
-        )
-        .await?;
+            format!("{non_authoritative_path}/{}_entity.json", &id),
+        ).await?;
         let wikipedia_entity_data: serde_json::Value = entity_file.as_json()?;
 
         // Parse the wikipedia entity data
@@ -215,7 +214,7 @@ pub async fn get_photos_and_summaries(
             let summary_file = FileThatIsSomewhere::get(
                 &summary_url,
                 opt_client,
-                format!("{non_authoritative_path}/summary.json"),
+                format!("{non_authoritative_path}/{}_summary.json", &id),
             )
             .await?;
             let response = summary_file.as_json()?;
@@ -257,7 +256,7 @@ pub async fn get_photos_and_summaries(
                         let image_metadata_file = FileThatIsSomewhere::get(
                             &image_metadata_url,
                             opt_client,
-                            format!("{non_authoritative_path}/image_metadata.json"),
+                            format!("{non_authoritative_path}/{}_image_metadata.json", &id),
                         )
                         .await?;
 
@@ -266,7 +265,7 @@ pub async fn get_photos_and_summaries(
                             parse_image_info(title, image_metadata_file.as_json()?)
                         {
                             // Store the attribution in the appropriate directory, as a text file.
-                            store_attr_txt(&img_data, &uploadable_path).await?;
+                            store_attr_txt(&img_data, &uploadable_path, title).await?;
 
                             // Then download the actual file
                             let image_file = FileThatIsSomewhere::get(
@@ -289,20 +288,33 @@ pub async fn get_photos_and_summaries(
         entity_file.persist_if_needed()?;
 
         println!("Found MP {mp:?}");
-        results.insert(
-            Electorate {
-                chamber: Chamber::Australian_House_Of_Representatives,
-                region: Some(electorate_name),
-            },
-            mp,
-        );
+        // Also add to the list rather than making a new list, if the list is already there.
+        // From the rust book:
+        //     for word in text.split_whitespace() {
+        //         let count = map.entry(word).or_insert(0);
+        //         *count += 1;
+        //     }
+        // or even better:
+        //  for (i, c) in "hello!".chars().enumerate() {
+        // 
+        //     h.entry(c).or_insert(Vec::new()).push(i);
+        // 
+        //   }
+        // FIXME - put 'None' if the chamber doesn't have regions.
+        let electorate = Electorate {
+            chamber,
+            region: Some(electorate_name)
+        };
+        results.entry(electorate)
+            .or_insert(Vec::new())
+            .push(mp); 
     }
     Ok(results)
 }
 
 /// Store a pretty-printed text file with the attribution info, into the directory in which the
 /// image will be posted.
-async fn store_attr_txt(img_data: &ImageInfo, path: &String) -> anyhow::Result<File> {
+async fn store_attr_txt(img_data: &ImageInfo, path: &String, wikipedia_title: &str) -> anyhow::Result<File> {
     std::fs::create_dir_all(crate::parse_util::TEMP_DIR)?;
     let mut attribution_file = NamedTempFile::new_in(crate::parse_util::TEMP_DIR)?;
     const UNKNOWN: &str = "Unknown";
@@ -325,7 +337,7 @@ async fn store_attr_txt(img_data: &ImageInfo, path: &String) -> anyhow::Result<F
     );
     attribution_file.write_all(attr.as_bytes())?;
     attribution_file.flush()?;
-    let filepath = format!("{}/{}.{}", path, "attr", "txt");
+    let filepath = format!("{}/{}_{}.{}", path, wikipedia_title, "attr", "txt");
     Ok(attribution_file.persist(&filepath)?)
 }
 
