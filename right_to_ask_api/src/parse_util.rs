@@ -70,8 +70,8 @@ pub(crate) async fn download_wiki_data_to_file(query:&str, client: &Client) -> a
 
 /// Read the json data stored in file; return a tuple of Name, district, ID
 /// TODO Use get_nested_json.
-pub async  fn parse_wiki_data(file: File) -> anyhow::Result<Vec<(String, String, String)>> {
-    let mut mps_data : Vec<(String, String, String)> = Vec::new();
+pub async  fn parse_wiki_data(file: File) -> anyhow::Result<Vec<(String, Option<String>, String)>> {
+    let mut mps_data : Vec<(String, Option<String>, String)> = Vec::new();
     let raw : Value = serde_json::from_reader(file)?;
     println!("Got data from file: {}", raw.to_string());
     let raw = raw.get("results").unwrap().get("bindings").and_then(|v|v.as_array()).ok_or_else(||anyhow!("Can't parse wiki data json."))?;
@@ -83,7 +83,10 @@ pub async  fn parse_wiki_data(file: File) -> anyhow::Result<Vec<(String, String,
        let district = mp.get("districtLabel").unwrap().get("value").expect("Can't find mp's district in json").as_str().unwrap();
        let name = mp.get("mpLabel").unwrap().get("value").expect("Can't find mp's name in json").as_str().unwrap();
        println!("Found MP id = {id}, name = {name}, district = {district}", id=id, name=name);
-       mps_data.push((name.to_string(), district.to_string(), id.to_string()));
+        // TODO check that for chambers with no district (e.g. NSW LC) we do indeed get an empty string here.
+       let district = if district.is_empty() { None } else { Some(district.to_string()) };
+
+       mps_data.push((name.to_string(), district, id.to_string()));
     }
     Ok(mps_data)
 }

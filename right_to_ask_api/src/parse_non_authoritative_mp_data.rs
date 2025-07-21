@@ -127,31 +127,33 @@ pub async fn get_photos_and_summaries(
     opt_client: Option<&reqwest::Client>,
 ) -> anyhow::Result<HashMap<Electorate, Vec<MPNonAuthoritative>>> {
     println!("Getting photos and summaries - got json file {}", json_file);
-    let found: Vec<(String, String, String)> = parse_wiki_data(File::open(json_file)?).await?;
+    let found: Vec<(String, Option<String>, String)> = parse_wiki_data(File::open(json_file)?).await?;
     let mut results: HashMap<Electorate, Vec<MPNonAuthoritative>> = HashMap::new();
 
     for (name, electorate_name, id) in found {
-        let electorate_name = canonicalise_electorate_name(chamber, &electorate_name)?;
-        
         // Make a directory labelled with the electorate for data that will be used to find the picture, but not used after creating MPs.json.
+
+        // FIXME Do something more intelligent than just setting to None if we go an error.
+        let electorate_name = electorate_name.and_then(|e| canonicalise_electorate_name(chamber, &e).unwrap_or(None));
+        let directory : String = match &electorate_name {
+            Some(name) => format!( "{}/{}/{}/", PICS_DIR, chamber, &name),
+            None =>  format!( "{}/{}/", PICS_DIR, chamber)
+        };
+
         let non_authoritative_path = format!(
-            "{}/{}/{}/{}/{}/",
-            MP_SOURCE.to_string(),
-            NON_AUTHORITATIVE_DIR.to_string(),
-            PICS_DIR.to_string(),
-            chamber,
-            &electorate_name
+            "{}/{}/{}/",
+            MP_SOURCE,
+            NON_AUTHORITATIVE_DIR,
+            directory
         );
         std::fs::create_dir_all(&non_authoritative_path)?;
 
         // Make a directory labelled with the electorate, for storing image info
         // intended for server upload. That is, it will be used in addition to MPs.json.
         let uploadable_path = format!(
-            "{}/{}/{}/{}/",
+            "{}/{}/",
             MP_SOURCE,
-            PICS_DIR,
-            chamber,
-            &electorate_name
+            directory
         );
         std::fs::create_dir_all(&uploadable_path)?;
 
@@ -161,12 +163,7 @@ pub async fn get_photos_and_summaries(
         let mut mp: MPNonAuthoritative = MPNonAuthoritative {
             name: name.clone(),
             electorate_name: electorate_name.clone(),
-            path: format!(
-                "{}/{}/{}/",
-                PICS_DIR,
-                chamber,
-                &electorate_name
-            ),
+            path: directory,
             ..Default::default()
         };
 
@@ -290,11 +287,10 @@ pub async fn get_photos_and_summaries(
         entity_file.persist_if_needed()?;
 
         // println!("Found MP {mp:?}");
-        
-        // FIXME - put 'None' if the chamber doesn't have regions.
+
         let electorate = Electorate {
             chamber,
-            region: Some(electorate_name)
+            region: electorate_name
         };
         results.entry(electorate)
             .or_insert(Vec::new())
@@ -308,10 +304,10 @@ pub async fn get_photos_and_summaries(
 /// We may at some point have a problem with capitalisation for electorate names, but for the 
 /// moment we don't.
 /// TODO deal appropriately with chambers that don't have a region, e.g. NSW/SA Legislative Council.
-fn canonicalise_electorate_name(chamber: Chamber, region: &str) -> anyhow::Result<String> {
+fn canonicalise_electorate_name(chamber: Chamber, region: &str) -> anyhow::Result<Option<String>> {
     match chamber {
-        Chamber::Australian_Senate => Ok(State::try_from(region.to_uppercase().as_str())?.to_string()),
-        _ => Ok(region.to_string()),
+        Chamber::Australian_Senate => Ok(Some(State::try_from(region.to_uppercase().as_str())?.to_string())),
+        _ => Ok(Some(region.to_string())),
     }
 }
 

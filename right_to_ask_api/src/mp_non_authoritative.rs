@@ -13,7 +13,7 @@ pub struct MPNonAuthoritative {
     pub wikipedia_summary : Option<String>,
     pub name: String,
     pub img_data : Option<ImageInfo>, // path, filename, attribution
-    pub electorate_name : String,
+    pub electorate_name : Option<String>,
     pub links : HashMap<String, String>,  // meant to be, e.g. ``Wikipedia, {wikipedia page}''
     pub path: String,  // The path in our system (e.g. /chamber/electorate-name/)
 }
