@@ -29,9 +29,10 @@ use crate::parse_pdf_util::{parse_pdf_to_strings_with_same_font, extract_string}
 use regex::Regex;
 use calamine::{open_workbook, Xls, Reader, Xlsx};
 use encoding_rs_io::DecodeReaderBytesBuilder;
+use reqwest::Client;
 use crate::mp_non_authoritative::MPNonAuthoritative;
 use crate::parse_util::{download_to_file};
-use crate::regions::Chamber::{Australian_House_Of_Representatives, Australian_Senate};
+use crate::regions::Chamber::{Australian_House_Of_Representatives, Australian_Senate, NSW_Legislative_Assembly, NSW_Legislative_Council};
 
 pub const MP_SOURCE : &'static str = "data/MP_source";
 const WIKIDATA_SUFFIX : &'static str = "_wikidata.json";
@@ -666,23 +667,29 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     house_reps_pdf.persist(dir.join(Chamber::Australian_House_Of_Representatives.to_string()+".pdf"))?;
     // Could update there seems to be a new easier to parse format https://www.aph.gov.au/Senators_and_Members/Parliamentarian_Search_Results?expand=1&q=&mem=1&par=-1&gen=0&ps=50&st=1
     // Federal Wikidata
-    let wiki_data_file = get_wikidata_json(&client, Chamber::Australian_House_Of_Representatives).await?;
+    store_wiki_data(&dir, &client, &Australian_House_Of_Representatives).await?;
+    store_wiki_data(&dir, &client, &Australian_Senate).await?;
+    /*
+    let wiki_data_file = get_wikidata_json(&client, &Chamber::Australian_House_Of_Representatives).await?;
     let wiki_data_file_path = dir.join(Chamber::Australian_House_Of_Representatives.to_string() + WIKIDATA_SUFFIX);
     wiki_data_file.persist(&wiki_data_file_path)?;
-    get_photos_and_summaries(wiki_data_file_path.to_str().unwrap(), Chamber::Australian_House_Of_Representatives, Some(&client)).await?;
+    get_photos_and_summaries(wiki_data_file_path.to_str().unwrap(), &Chamber::Australian_House_Of_Representatives, Some(&client)).await?;
 
-    let wiki_data_file = get_wikidata_json(&client, Chamber::Australian_Senate).await?;
+    let wiki_data_file = get_wikidata_json(&client, &Chamber::Australian_Senate).await?;
     let wiki_data_file_path = dir.join(Chamber::Australian_Senate.to_string() + WIKIDATA_SUFFIX);
     wiki_data_file.persist(&wiki_data_file_path)?;
-    get_photos_and_summaries(wiki_data_file_path.to_str().unwrap(), Chamber::Australian_Senate, Some(&client)).await?;
-    
+    get_photos_and_summaries(wiki_data_file_path.to_str().unwrap(), &Chamber::Australian_Senate, Some(&client)).await?;
+    */
+
     // NSW
     let la = download_to_file("https://www.parliament.nsw.gov.au/_layouts/15/NSWParliament/memberlistservice.aspx?members=LA&format=Excel").await?;
     parse_nsw_la(la.reopen()?)?;
     la.persist(dir.join(Chamber::NSW_Legislative_Assembly.to_string()+".csv"))?;
+    store_wiki_data(&dir, &client, &NSW_Legislative_Assembly).await?;
     let lc = download_to_file("https://www.parliament.nsw.gov.au/_layouts/15/NSWParliament/memberlistservice.aspx?members=LA&format=Excel").await?;
     parse_nsw_lc(lc.reopen()?)?;
     lc.persist(dir.join(Chamber::NSW_Legislative_Council.to_string()+".csv"))?;
+    store_wiki_data(&dir, &client, &NSW_Legislative_Council).await?;
 
     // ACT
     let la = download_to_file("https://www.parliament.act.gov.au/members/current").await?;
@@ -691,6 +698,14 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
 
     Ok(())
 
+}
+
+async fn store_wiki_data(dir: &PathBuf, client : &Client, chamber: &Chamber) -> anyhow::Result<()> {
+    let wiki_data_file = get_wikidata_json(&client, chamber).await?;
+    let wiki_data_file_path = dir.join(chamber.to_string() + WIKIDATA_SUFFIX);
+    wiki_data_file.persist(&wiki_data_file_path)?;
+    get_photos_and_summaries(wiki_data_file_path.to_str().unwrap(), chamber, Some(&client)).await?;
+    Ok(())
 }
 
 /// Create "data/MP_source/MPs.json" from the source files downloaded by update_mp_list_of_files(). Second of the two stages for generating MPs.json
@@ -729,11 +744,13 @@ pub async fn create_mp_list() -> anyhow::Result<()> {
     }
     { // Deal with NSW
         println!("Processing NSW");
-        let found =parse_nsw_la(File::open(dir.join(Chamber::NSW_Legislative_Assembly.to_string()+".csv"))?)?;
+        let mut found =parse_nsw_la(File::open(dir.join(Chamber::NSW_Legislative_Assembly.to_string()+".csv"))?)?;
         println!("Found {} in the NSW Legislative Assembly",found.len());
+        add_non_authoritative(&mut found, &dir, NSW_Legislative_Assembly).await?;
         mps.extend(found);
-        let found=parse_nsw_lc(File::open(dir.join(Chamber::NSW_Legislative_Council.to_string()+".csv"))?)?;
+        let mut found =parse_nsw_lc(File::open(dir.join(Chamber::NSW_Legislative_Council.to_string()+".csv"))?)?;
         println!("Found {} in the NSW Legislative Council",found.len());
+        add_non_authoritative(&mut found, &dir, NSW_Legislative_Council).await?;
         mps.extend(found);
     }
     { // Deal with NT
@@ -799,7 +816,7 @@ pub async fn create_mp_list() -> anyhow::Result<()> {
 async fn add_non_authoritative(mps: &mut Vec<MP>, dir: &PathBuf, chamber: Chamber) -> anyhow::Result<()> {
     let mut non_authoritative= get_photos_and_summaries(
         dir.join(chamber.to_string() + WIKIDATA_SUFFIX).to_str().unwrap(),
-        chamber,
+        &chamber,
         None).await?;
 
     for mp in mps {

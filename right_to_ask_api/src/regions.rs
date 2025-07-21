@@ -40,7 +40,6 @@ impl TryFrom<&str> for State {
 			b"TAS" => Ok(State::TAS),
 			b"VIC" => Ok(State::VIC),
 			b"WA" => Ok(State::WA),
-			// FIXME VT: Check this doesn't break something else
 			b"AUSTRALIAN CAPITAL TERRITORY" => Ok(State::ACT),
 			b"NEW SOUTH WALES" => Ok(State::NSW),
 			b"NORTHERN TERRITORY" => Ok(State::NT),

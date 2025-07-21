@@ -48,7 +48,7 @@ fn wiki_data_code(chamber: &Chamber) -> String {
 }
 
 /// Get wikidata download for all the MPs in the given chamber.
-pub async fn get_wikidata_json(client: &reqwest::Client, chamber: Chamber) -> anyhow::Result<NamedTempFile> {
+pub async fn get_wikidata_json(client: &reqwest::Client, chamber: &Chamber) -> anyhow::Result<NamedTempFile> {
     let query_string = format!("{}{}{}{}{}{}{}{}{}{}{}{}",
 "       SELECT ?mp ?mpLabel ?districtLabel ?assumedOffice where {",
 "    ?mp p:P39 ?posheld.",    // # Check on the position
@@ -123,7 +123,7 @@ impl FileThatIsSomewhere {
 /// Download all the non-authoritative data.
 /// If the client is None, it does no downloading; if the client is present, it is used for downloads.
 pub async fn get_photos_and_summaries(
-    json_file: &str, chamber: Chamber,
+    json_file: &str, chamber: &Chamber,
     opt_client: Option<&reqwest::Client>,
 ) -> anyhow::Result<HashMap<Electorate, Vec<MPNonAuthoritative>>> {
     println!("Getting photos and summaries - got json file {}", json_file);
@@ -136,12 +136,12 @@ pub async fn get_photos_and_summaries(
         // FIXME Do something more intelligent than just setting to None if we go an error.
         let electorate_name = electorate_name.and_then(|e| canonicalise_electorate_name(chamber, &e).unwrap_or(None));
         let directory : String = match &electorate_name {
-            Some(name) => format!( "{}/{}/{}/", PICS_DIR, chamber, &name),
-            None =>  format!( "{}/{}/", PICS_DIR, chamber)
+            Some(name) => format!( "{}/{}/{}", PICS_DIR, chamber, &name),
+            None =>  format!( "{}/{}", PICS_DIR, chamber)
         };
 
         let non_authoritative_path = format!(
-            "{}/{}/{}/",
+            "{}/{}/{}",
             MP_SOURCE,
             NON_AUTHORITATIVE_DIR,
             directory
@@ -151,7 +151,7 @@ pub async fn get_photos_and_summaries(
         // Make a directory labelled with the electorate, for storing image info
         // intended for server upload. That is, it will be used in addition to MPs.json.
         let uploadable_path = format!(
-            "{}/{}/",
+            "{}/{}",
             MP_SOURCE,
             directory
         );
@@ -289,7 +289,7 @@ pub async fn get_photos_and_summaries(
         // println!("Found MP {mp:?}");
 
         let electorate = Electorate {
-            chamber,
+            chamber: *chamber,
             region: electorate_name
         };
         results.entry(electorate)
@@ -304,7 +304,7 @@ pub async fn get_photos_and_summaries(
 /// We may at some point have a problem with capitalisation for electorate names, but for the 
 /// moment we don't.
 /// TODO deal appropriately with chambers that don't have a region, e.g. NSW/SA Legislative Council.
-fn canonicalise_electorate_name(chamber: Chamber, region: &str) -> anyhow::Result<Option<String>> {
+fn canonicalise_electorate_name(chamber: &Chamber, region: &str) -> anyhow::Result<Option<String>> {
     match chamber {
         Chamber::Australian_Senate => Ok(Some(State::try_from(region.to_uppercase().as_str())?.to_string())),
         _ => Ok(Some(region.to_string())),
