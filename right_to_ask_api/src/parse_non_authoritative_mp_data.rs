@@ -131,6 +131,8 @@ pub async fn get_photos_and_summaries(
     let mut results: HashMap<Electorate, Vec<MPNonAuthoritative>> = HashMap::new();
 
     for (name, electorate_name, id) in found {
+        let electorate_name = canonicalise_electorate_name(chamber, &electorate_name)?;
+        
         // Make a directory labelled with the electorate for data that will be used to find the picture, but not used after creating MPs.json.
         let non_authoritative_path = format!(
             "{}/{}/{}/{}/{}/",
@@ -156,7 +158,6 @@ pub async fn get_photos_and_summaries(
         // FIXME - clean this up and make the different names for directories cleaner.
         // Make the MP data structure into which all this info will be stored.
         // Note that not all chambers have individual electorates.
-        let electorate_name = canonicalise_electorate_name(chamber, &electorate_name)?;
         let mut mp: MPNonAuthoritative = MPNonAuthoritative {
             name: name.clone(),
             electorate_name: electorate_name.clone(),
@@ -288,19 +289,8 @@ pub async fn get_photos_and_summaries(
 
         entity_file.persist_if_needed()?;
 
-        println!("Found MP {mp:?}");
-        // Also add to the list rather than making a new list, if the list is already there.
-        // From the rust book:
-        //     for word in text.split_whitespace() {
-        //         let count = map.entry(word).or_insert(0);
-        //         *count += 1;
-        //     }
-        // or even better:
-        //  for (i, c) in "hello!".chars().enumerate() {
-        // 
-        //     h.entry(c).or_insert(Vec::new()).push(i);
-        // 
-        //   }
+        // println!("Found MP {mp:?}");
+        
         // FIXME - put 'None' if the chamber doesn't have regions.
         let electorate = Electorate {
             chamber,

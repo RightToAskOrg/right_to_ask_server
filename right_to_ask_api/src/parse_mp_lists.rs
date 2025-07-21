@@ -611,7 +611,7 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     let nt_members = download_to_file("https://parliament.nt.gov.au/__data/assets/pdf_file/0004/1457113/MASTER-15th-Legislative-Assembly-List-of-Members-for-webpage-March-2025.pdf").await?;
     parse_nt_la_pdf(nt_members.path())?;
     nt_members.persist(dir.join(Chamber::NT_Legislative_Assembly.to_string()+".pdf"))?;
-   
+
     
     // WA
     let la = download_to_file("https://www.parliament.wa.gov.au/parliament/memblist.nsf/WebCurrentMembLA?OpenView").await?;
