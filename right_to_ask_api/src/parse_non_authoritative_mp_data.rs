@@ -206,7 +206,6 @@ pub async fn get_photos_and_summaries(
                 "{}{}{}",
                 EN_WIKIPEDIA_API_URL,
                 WIKIPEDIA_EXTRACT_AND_IMAGES_REQUEST,
-                // percent_encoded_title
                 encoded_title
             );
 
@@ -214,8 +213,8 @@ pub async fn get_photos_and_summaries(
                 &summary_url,
                 opt_client,
                 format!("{non_authoritative_path}/{}_summary.json", &id),
-            )
-            .await?;
+            ).await?;
+
             let response = summary_file.as_json()?;
             // let mut image_name: Option<&Value> = None;
             // There's actually only one page number per page (I think), but since we don't know what they are,
@@ -256,13 +255,10 @@ pub async fn get_photos_and_summaries(
                             &image_metadata_url,
                             opt_client,
                             format!("{non_authoritative_path}/{}_image_metadata.json", &id),
-                        )
-                        .await?;
+                        ).await?;
 
                         // First get the image metadata
-                        if let Some(img_data) =
-                            parse_image_info(title, image_metadata_file.as_json()?)
-                        {
+                        if let Some(img_data) = parse_image_info(title, image_metadata_file.as_json()?) {
                             // Store the attribution in the appropriate directory, as a text file.
                             store_attr_txt(&img_data, &uploadable_path, title).await?;
 
@@ -271,8 +267,7 @@ pub async fn get_photos_and_summaries(
                                 &img_data.source_url.as_ref().unwrap(),
                                 opt_client,
                                 format!("{uploadable_path}/{}", img_data.filename),
-                            )
-                            .await?;
+                            ).await?;
                             image_file.persist_if_needed()?;
 
                             mp.img_data = Some(img_data);
