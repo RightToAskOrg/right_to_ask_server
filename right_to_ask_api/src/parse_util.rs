@@ -3,13 +3,12 @@
 use std::fs::File;
 use std::io::Write;
 use anyhow::anyhow;
+use mysql_common::frunk::path::PathTraverser;
 use regex::Regex;
 use reqwest::Client;
 use tempfile::NamedTempFile;
 use reqwest::header::{HeaderMap, ACCEPT, USER_AGENT, CONTENT_TYPE};
 use serde_json::Value;
-use url::form_urlencoded;
-use url::form_urlencoded::byte_serialize;
 
 /// Temporary file directory. Should be in same filesystem as MP_SOURCE.
 pub(crate) const TEMP_DIR : &'static str = "data/temp";
@@ -72,21 +71,20 @@ pub(crate) async fn download_wiki_data_to_file(query:&str, client: &Client) -> a
 }
 
 /// Read the json data stored in file; return a tuple of Name, district, ID
-/// TODO Remove unwraps.
 pub async  fn parse_wiki_data(file: File) -> anyhow::Result<Vec<(String, Option<String>, String)>> {
     let mut mps_data : Vec<(String, Option<String>, String)> = Vec::new();
     let raw : Value = serde_json::from_reader(file)?;
     println!("Got data from file: {}", raw.to_string());
-    let raw = raw.get("results").unwrap().get("bindings").and_then(|v|v.as_array()).ok_or_else(||anyhow!("Can't parse wiki data json."))?;
+    let raw : &Vec<Value> = raw.get("results")
+        .and_then(|r| r.get("bindings"))
+        .and_then(|v| v.as_array())
+        .ok_or_else(||anyhow!("Can't parse wiki data json."))?;
     for mp in raw {
-       // let id_url = mp.get("mp").unwrap().get("value").expect("Can't find mp ID in json:").as_str().unwrap();
        let id_url = get_nested_json(&mp, &["mp", "value"]).expect("Can't find mp url in json");
        let base_url_regexp = Regex::new(r"http://www.wikidata.org/entity/(?<QID>\w+)").unwrap();
        let id = &base_url_regexp.captures(id_url).expect("Can't extract ID from url")["QID"];
        println!("Got ID {}", id);
-       // let district = mp.get("districtLabel").unwrap().get("value").expect("Can't find mp's district in json").as_str().unwrap();
        let district = get_nested_json(&mp, &["districtLabel", "value"]).map(|x| x.to_string());
-       // let name = mp.get("mpLabel").unwrap().get("value").expect("Can't find mp's name in json").as_str().unwrap();
        let name = get_nested_json(&mp, &["mpLabel", "value"]).expect("Can't find mp's name in json");
        println!("Found MP id = {}, name = {}", id, name);
 

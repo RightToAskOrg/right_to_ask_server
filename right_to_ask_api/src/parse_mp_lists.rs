@@ -30,9 +30,8 @@ use regex::Regex;
 use calamine::{open_workbook, Xls, Reader, Xlsx};
 use encoding_rs_io::DecodeReaderBytesBuilder;
 use reqwest::Client;
-use crate::mp_non_authoritative::MPNonAuthoritative;
 use crate::parse_util::{download_to_file};
-use crate::regions::Chamber::{Australian_House_Of_Representatives, Australian_Senate, NSW_Legislative_Assembly, NSW_Legislative_Council};
+use crate::regions::Chamber::{ACT_Legislative_Assembly, Australian_House_Of_Representatives, Australian_Senate, NSW_Legislative_Assembly, NSW_Legislative_Council};
 
 pub const MP_SOURCE : &'static str = "data/MP_source";
 const WIKIDATA_SUFFIX : &'static str = "_wikidata.json";
@@ -612,44 +611,54 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     let nt_members = download_to_file("https://parliament.nt.gov.au/__data/assets/pdf_file/0004/1457113/MASTER-15th-Legislative-Assembly-List-of-Members-for-webpage-March-2025.pdf").await?;
     parse_nt_la_pdf(nt_members.path())?;
     nt_members.persist(dir.join(Chamber::NT_Legislative_Assembly.to_string()+".pdf"))?;
+    store_wiki_data(&dir, &client, &Chamber::NT_Legislative_Assembly).await?;
 
     
     // WA
     let la = download_to_file("https://www.parliament.wa.gov.au/parliament/memblist.nsf/WebCurrentMembLA?OpenView").await?;
     parse_wa(la.path(),Chamber::WA_Legislative_Assembly)?;
     la.persist(dir.join(Chamber::WA_Legislative_Assembly.to_string()+".html"))?;
+    store_wiki_data(&dir, &client, &Chamber::WA_Legislative_Assembly).await?;
     let lc = download_to_file("https://www.parliament.wa.gov.au/parliament/memblist.nsf/WebCurrentMembLC?OpenView").await?;
     parse_wa(lc.path(),Chamber::WA_Legislative_Council)?;
     lc.persist(dir.join(Chamber::WA_Legislative_Council.to_string()+".html"))?;
+    store_wiki_data(&dir, &client, &Chamber::WA_Legislative_Council).await?;
 
     // VIC
     let la = download_to_file("https://povwebsiteresourcestore.blob.core.windows.net/lists/assemblymembers.csv").await?;
     parse_vic_la(la.reopen()?)?;
     la.persist(dir.join(Chamber::Vic_Legislative_Assembly.to_string()+".csv"))?;
+    store_wiki_data(&dir, &client, &Chamber::Vic_Legislative_Assembly).await?;
     let lc = download_to_file("https://povwebsiteresourcestore.blob.core.windows.net/lists/councilmembers.csv").await?;
     parse_vic_lc(lc.reopen()?)?;
     lc.persist(dir.join(Chamber::Vic_Legislative_Council.to_string()+".csv"))?;
+    store_wiki_data(&dir, &client, &Chamber::Vic_Legislative_Council).await?;
 
     // TAS https://www.parliament.tas.gov.au/__data/assets/excel_doc/0026/14597/Housemembers.xlsx
     let ha = download_to_file("https://www.parliament.tas.gov.au/__data/assets/excel_doc/0026/14597/Housemembers.xlsx").await?;
     parse_tas(ha.path(),Chamber::Tas_House_Of_Assembly)?;
     ha.persist(dir.join(Chamber::Tas_House_Of_Assembly.to_string()+".xlsx"))?;
+    store_wiki_data(&dir, &client, &Chamber::Tas_House_Of_Assembly).await?;
     let lc = download_to_file("https://www.parliament.tas.gov.au/__data/assets/excel_doc/0015/94002/Mail-Merge-as-at-3-June-2025.xlsx").await?;
     parse_tas(lc.path(),Chamber::Tas_Legislative_Council)?;
     lc.persist(dir.join(Chamber::Tas_Legislative_Council.to_string()+".xlsx"))?;
+    store_wiki_data(&dir, &client, &Chamber::Tas_Legislative_Council).await?;
 
     // SA
     let ha = download_to_file("https://contact-details-api.parliament.sa.gov.au/api/HAMembersDetails").await?;
     parse_sa(ha.reopen()?,Chamber::SA_House_Of_Assembly)?;
     ha.persist(dir.join(Chamber::SA_House_Of_Assembly.to_string()+".json"))?;
+    store_wiki_data(&dir, &client, &Chamber::SA_House_Of_Assembly).await?;
     let lc = download_to_file("https://contact-details-api.parliament.sa.gov.au/api/LCMembersDetails").await?;
     parse_sa(lc.reopen()?,Chamber::SA_Legislative_Council)?;
     lc.persist(dir.join(Chamber::SA_Legislative_Council.to_string()+".json"))?;
+    store_wiki_data(&dir, &client, &Chamber::SA_Legislative_Council).await?;
 
     // QLD
     let qld_members = download_to_file("https://documents.parliament.qld.gov.au/Members/mailingLists/MEMMERGEEXCEL.xls").await?;
     parse_qld_parliament(qld_members.path())?;
     qld_members.persist(dir.join(Chamber::Qld_Legislative_Assembly.to_string()+".xls"))?;
+    store_wiki_data(&dir, &client, &Chamber::Qld_Legislative_Assembly).await?;
 
     // Federal CSVs.
     let house_reps = download_to_file("https://www.aph.gov.au/-/media/03_Senators_and_Members/Address_Labels_and_CSV_files/FamilynameRepsCSV.csv").await?;
@@ -669,17 +678,6 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     // Federal Wikidata
     store_wiki_data(&dir, &client, &Australian_House_Of_Representatives).await?;
     store_wiki_data(&dir, &client, &Australian_Senate).await?;
-    /*
-    let wiki_data_file = get_wikidata_json(&client, &Chamber::Australian_House_Of_Representatives).await?;
-    let wiki_data_file_path = dir.join(Chamber::Australian_House_Of_Representatives.to_string() + WIKIDATA_SUFFIX);
-    wiki_data_file.persist(&wiki_data_file_path)?;
-    get_photos_and_summaries(wiki_data_file_path.to_str().unwrap(), &Chamber::Australian_House_Of_Representatives, Some(&client)).await?;
-
-    let wiki_data_file = get_wikidata_json(&client, &Chamber::Australian_Senate).await?;
-    let wiki_data_file_path = dir.join(Chamber::Australian_Senate.to_string() + WIKIDATA_SUFFIX);
-    wiki_data_file.persist(&wiki_data_file_path)?;
-    get_photos_and_summaries(wiki_data_file_path.to_str().unwrap(), &Chamber::Australian_Senate, Some(&client)).await?;
-    */
 
     // NSW
     let la = download_to_file("https://www.parliament.nsw.gov.au/_layouts/15/NSWParliament/memberlistservice.aspx?members=LA&format=Excel").await?;
@@ -695,6 +693,7 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     let la = download_to_file("https://www.parliament.act.gov.au/members/current").await?;
     parse_act_la(la.path())?;
     la.persist(dir.join(Chamber::ACT_Legislative_Assembly.to_string()+".html"))?;
+    store_wiki_data(&dir, &client, &ACT_Legislative_Assembly).await?;
 
     Ok(())
 
@@ -739,8 +738,9 @@ pub async fn create_mp_list() -> anyhow::Result<()> {
     };
     { // Deal with Assembly of the ACT
         println!("Processing ACT");
-        let found = parse_act_la(&dir.join(Chamber::ACT_Legislative_Assembly.to_string()+".html"))?;
+        let mut found = parse_act_la(&dir.join(Chamber::ACT_Legislative_Assembly.to_string()+".html"))?;
         println!("Found {} in the ACT Legislative Assembly",found.len());
+        add_non_authoritative(&mut found, &dir, ACT_Legislative_Assembly).await?;
     }
     { // Deal with NSW
         println!("Processing NSW");
@@ -755,50 +755,60 @@ pub async fn create_mp_list() -> anyhow::Result<()> {
     }
     { // Deal with NT
         println!("Processing NT");
-        let found=parse_nt_la_pdf(&dir.join(Chamber::NT_Legislative_Assembly.to_string()+".pdf"))?;
+        let mut found=parse_nt_la_pdf(&dir.join(Chamber::NT_Legislative_Assembly.to_string()+".pdf"))?;
         println!("Found {} in the NT Legislative Assembly",found.len());
+        add_non_authoritative(&mut found, &dir, Chamber::NT_Legislative_Assembly).await?;
         mps.extend(found);
     }
     { // Deal with QLD
         println!("Processing Qld");
-        let found = parse_qld_parliament(&dir.join(Chamber::Qld_Legislative_Assembly.to_string()+".xls"))?;
+        let mut found = parse_qld_parliament(&dir.join(Chamber::Qld_Legislative_Assembly.to_string()+".xls"))?;
         println!("Found {} in the Queensland Legislative Assembly",found.len());
+        add_non_authoritative(&mut found, &dir, Chamber::Qld_Legislative_Assembly).await?;
         mps.extend(found);
     }
     { // Deal with SA
         println!("Processing SA");
-        let found = parse_sa(File::open(dir.join(Chamber::SA_Legislative_Council.to_string()+".json"))?,Chamber::SA_Legislative_Council)?;
+        let mut found = parse_sa(File::open(dir.join(Chamber::SA_Legislative_Council.to_string()+".json"))?, Chamber::SA_Legislative_Council)?;
         println!("Found {} in the SA Legislative Council",found.len());
+        add_non_authoritative(&mut found, &dir, Chamber::SA_Legislative_Council).await?;
         mps.extend(found);
-        let found =parse_sa(File::open(dir.join(Chamber::SA_House_Of_Assembly.to_string()+".json"))?, Chamber::SA_House_Of_Assembly)?;
+        let mut found =parse_sa(File::open(dir.join(Chamber::SA_House_Of_Assembly.to_string()+".json"))?, Chamber::SA_House_Of_Assembly)?;
         println!("Found {} in the SA Legislative Assembly",found.len());
+        add_non_authoritative(&mut found, &dir, Chamber::SA_House_Of_Assembly).await?;
         mps.extend(found);
     }
     { // Deal with TAS
         println!("Processing Tas");
-        let found = parse_tas(&dir.join(Chamber::Tas_House_Of_Assembly.to_string()+".xlsx"),Chamber::Tas_House_Of_Assembly)?;
+        let mut found = parse_tas(&dir.join(Chamber::Tas_House_Of_Assembly.to_string()+".xlsx"),Chamber::Tas_House_Of_Assembly)?;
         println!("Found {} in the Tas House of Assembly",found.len());
+        add_non_authoritative(&mut found, &dir, Chamber::Tas_House_Of_Assembly).await?;
         mps.extend(found);
-        let found = parse_tas(&dir.join(Chamber::Tas_Legislative_Council.to_string()+".xlsx"),Chamber::Tas_Legislative_Council)?;
+        let mut found = parse_tas(&dir.join(Chamber::Tas_Legislative_Council.to_string()+".xlsx"),Chamber::Tas_Legislative_Council)?;
         println!("Found {} in the Tas Legislative Council",found.len());
+        add_non_authoritative(&mut found, &dir, Chamber::Tas_Legislative_Council).await?;
         mps.extend(found);
     }
     { // Deal with VIC
         println!("Processing Vic");
-        let found = parse_vic_la(File::open(dir.join(Chamber::Vic_Legislative_Assembly.to_string()+".csv"))?)?;
+        let mut found = parse_vic_la(File::open(dir.join(Chamber::Vic_Legislative_Assembly.to_string()+".csv"))?)?;
         println!("Found {} in the Vic Legislative Assembly",found.len());
+        add_non_authoritative(&mut found, &dir, Chamber::Vic_Legislative_Assembly).await?;
         mps.extend(found);
-        let found = parse_vic_lc(File::open(dir.join(Chamber::Vic_Legislative_Council.to_string()+".csv"))?)?;
+        let mut found = parse_vic_lc(File::open(dir.join(Chamber::Vic_Legislative_Council.to_string()+".csv"))?)?;
         println!("Found {} in the Vic Legislative Council",found.len());
+        add_non_authoritative(&mut found, &dir, Chamber::Vic_Legislative_Council).await?;
         mps.extend(found);
     }
     { // Deal with WA
         println!("Processing WA");
-        let found = parse_wa(&dir.join(Chamber::WA_Legislative_Assembly.to_string()+".html"),Chamber::WA_Legislative_Assembly)?;
+        let mut found = parse_wa(&dir.join(Chamber::WA_Legislative_Assembly.to_string()+".html"),Chamber::WA_Legislative_Assembly)?;
         println!("Found {} in the WA Legislative Assembly",found.len());
+        add_non_authoritative(&mut found, &dir, Chamber::WA_Legislative_Assembly).await?;
         mps.extend(found);
-        let found = parse_wa(&dir.join(Chamber::WA_Legislative_Council.to_string()+".html"),Chamber::WA_Legislative_Council)?;
+        let mut found = parse_wa(&dir.join(Chamber::WA_Legislative_Council.to_string()+".html"),Chamber::WA_Legislative_Council)?;
         println!("Found {} in the WA Legislative Council",found.len());
+        add_non_authoritative(&mut found, &dir, Chamber::WA_Legislative_Council).await?;
         mps.extend(found);
     }
     

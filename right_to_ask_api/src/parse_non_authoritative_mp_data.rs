@@ -7,11 +7,10 @@ use crate::parse_util::{
     strip_quotes,
 };
 use crate::regions::{Chamber, Electorate, State};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap};
 use std::fs::File;
 use std::io::Write;
 use tempfile::NamedTempFile;
-use url::form_urlencoded;
 use url::form_urlencoded::byte_serialize;
 
 pub const MP_SOURCE: &'static str = "data/MP_source";
