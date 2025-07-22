@@ -686,7 +686,7 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     parse_nsw_la(la.reopen()?)?;
     la.persist(dir.join(Chamber::NSW_Legislative_Assembly.to_string()+".csv"))?;
     store_wiki_data(&dir, &client, &NSW_Legislative_Assembly).await?;
-    let lc = download_to_file("https://www.parliament.nsw.gov.au/_layouts/15/NSWParliament/memberlistservice.aspx?members=LA&format=Excel").await?;
+    let lc = download_to_file("https://www.parliament.nsw.gov.au/_layouts/15/NSWParliament/memberlistservice.aspx?members=LC&format=Excel").await?;
     parse_nsw_lc(lc.reopen()?)?;
     lc.persist(dir.join(Chamber::NSW_Legislative_Council.to_string()+".csv"))?;
     store_wiki_data(&dir, &client, &NSW_Legislative_Council).await?;
