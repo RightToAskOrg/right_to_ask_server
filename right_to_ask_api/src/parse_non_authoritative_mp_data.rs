@@ -11,6 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::Write;
 use tempfile::NamedTempFile;
+use url::form_urlencoded;
 use url::form_urlencoded::byte_serialize;
 
 pub const MP_SOURCE: &'static str = "data/MP_source";
@@ -191,7 +192,7 @@ pub async fn get_photos_and_summaries(
         // But just doing one for now.
         let url = format!(
             "{}{}{}",
-            WIKIPEDIA_API_URL, WIKIPEDIA_SITE_LINKS_REQUEST, &id
+            WIKIPEDIA_API_URL, WIKIPEDIA_SITE_LINKS_REQUEST, byte_serialize(id.as_bytes()).collect::<String>()
         );
         println!("Processing {}", &name);
 
@@ -245,7 +246,7 @@ pub async fn get_photos_and_summaries(
                     // Add the wikipedia page as a link.
                     mp.links.insert(
                         String::from("wikipedia"),
-                        format!("{}{}", WIKIPEDIA_PAGE_FROM_ID, page_id),
+                        format!("{}{}", WIKIPEDIA_PAGE_FROM_ID, byte_serialize(page_id.as_bytes()).collect::<String>()),
                     );
 
                     // Add the wikipedia summary.
@@ -261,11 +262,11 @@ pub async fn get_photos_and_summaries(
                     }
 
                     if let Some(filename_with_quotes) = image_name {
-                        let filename = strip_quotes(&filename_with_quotes);
+                        let filename = byte_serialize(strip_quotes(&filename_with_quotes).as_bytes()).collect::<String>();
                         let image_metadata_url: String = format!(
                             "{EN_WIKIPEDIA_API_URL}{WIKIPEDIA_IMAGE_INFO_REQUEST}{}",
                             // Get rid of "
-                            filename.replace("\"", "")
+                            filename
                         );
                         let image_metadata_file = FileThatIsSomewhere::get(
                             &image_metadata_url,

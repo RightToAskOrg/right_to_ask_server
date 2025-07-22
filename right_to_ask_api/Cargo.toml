@@ -41,4 +41,3 @@ lru = "0.10"
 lettre = { version = "0.10", features=["smtp-transport","tokio1","tokio1-native-tls","serde"]}
 # Just used for binaries. May be removed in future.
 tokio = { version = "1.26", features = ["full"] }
-percent-encoding = "2.3.1"
