@@ -76,12 +76,15 @@ pub async  fn parse_wiki_data(file: File) -> anyhow::Result<Vec<(String, Option<
     println!("Got data from file: {}", raw.to_string());
     let raw = raw.get("results").unwrap().get("bindings").and_then(|v|v.as_array()).ok_or_else(||anyhow!("Can't parse wiki data json."))?;
     for mp in raw {
-       let id_url = mp.get("mp").unwrap().get("value").expect("Can't find mp ID in json").as_str().unwrap();
+       let id_url = mp.get("mp").unwrap().get("value").expect("Can't find mp ID in json:").as_str().unwrap();
+       let id_url = get_nested_json(&mp, &["mp", "value"]).expect("Can't find mp url in json");
        let base_url_regexp = Regex::new(r"http://www.wikidata.org/entity/(?<QID>\w+)").unwrap();
-       let id = &base_url_regexp.captures(id_url).unwrap()["QID"]; 
+       let id = &base_url_regexp.captures(id_url).expect("Can't extract ID from url")["QID"];
        println!("Got ID {}", id);
        let district = mp.get("districtLabel").unwrap().get("value").expect("Can't find mp's district in json").as_str().unwrap();
+       let district = get_nested_json(&mp, &["districtLabel", "value"]).expect("Can't find mp's district in json");
        let name = mp.get("mpLabel").unwrap().get("value").expect("Can't find mp's name in json").as_str().unwrap();
+       let name = get_nested_json(&mp, &["mpLabel", "value"]).expect("Can't find mp's name in json");
        println!("Found MP id = {id}, name = {name}, district = {district}", id=id, name=name);
         // TODO check that for chambers with no district (e.g. NSW LC) we do indeed get an empty string here.
        let district = if district.is_empty() { None } else { Some(district.to_string()) };

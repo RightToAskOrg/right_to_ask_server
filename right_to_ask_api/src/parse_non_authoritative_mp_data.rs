@@ -48,18 +48,34 @@ fn wiki_data_code(chamber: &Chamber) -> String {
 }
 
 /// Get wikidata download for all the MPs in the given chamber.
+/// An example for pasting into Wikidata, with districts:
+/* SELECT ?mp ?mpLabel ?districtLabel ?assumedOffice where {
+     ?mp p:P39 ?posheld.    # Check on the position
+     ?posheld ps:P39 wd:Q18912794;
+              pq:P768 ?district;
+              pq:P580 ?assumedOffice. # And should have a starttime
+     MINUS { ?posheld pq:P582 ?endTime. } # But not an endtime
+     SERVICE wikibase:label { bd:serviceParam wikibase:language "[AUTO_LANGUAGE],mul,en". }
+ }
+ GROUP BY ?mp ?mpLabel ?districtLabel ?assumedOffice
+ ORDER BY ?mpLabel
+ LIMIT 180
+*/
+/// The district request is omitted for chambers with no districts (some Legislative Councils).
 pub async fn get_wikidata_json(client: &reqwest::Client, chamber: &Chamber) -> anyhow::Result<NamedTempFile> {
-    let query_string = format!("{}{}{}{}{}{}{}{}{}{}{}{}",
-"       SELECT ?mp ?mpLabel ?districtLabel ?assumedOffice where {",
-"    ?mp p:P39 ?posheld.",    // # Check on the position
-"    ?posheld ps:P39 wd:", //# Position held 
-        wiki_data_code(&chamber),
-"            ; pq:P768 ?district;",
+    let fields = format!("?mp ?mpLabel{} ?assumedOffice",
+                         if chamber.has_regions() {" ?districtLabel"} else {""} );
+    let query_string = format!("SELECT {}{}{}{}{}{}{}{}{}{}{}{}{}",
+        &fields,
+"       where { ?mp p:P39 ?posheld.",    // # Check on the position
+"               ?posheld ps:P39 wd:", //# Position held
+        wiki_data_code(&chamber) + ";",
+if chamber.has_regions() {"pq:P768 ?district;"} else {""}, // Ask for district only if the chamber has them.
 "             pq:P580 ?assumedOffice.", // # And should have a starttime
 "    MINUS { ?posheld pq:P582 ?endTime. }", // # But not an endtime
 "    SERVICE wikibase:label { bd:serviceParam wikibase:language \"[AUTO_LANGUAGE],mul,en\". }",
 "}",
-" GROUP BY ?mp ?mpLabel ?districtLabel ?assumedOffice",
+" GROUP BY ", &fields,
 " ORDER BY ?mpLabel",
 " LIMIT 180"  // Should be large enough to guarantee no Australian parliament has more members.
     );
@@ -133,7 +149,7 @@ pub async fn get_photos_and_summaries(
     for (name, electorate_name, id) in found {
         // Make a directory labelled with the electorate for data that will be used to find the picture, but not used after creating MPs.json.
 
-        // FIXME Do something more intelligent than just setting to None if we go an error.
+        // FIXME Do something more intelligent than just setting to None if we got an error.
         let electorate_name = electorate_name.and_then(|e| canonicalise_electorate_name(chamber, &e).unwrap_or(None));
         let directory : String = match &electorate_name {
             Some(name) => format!( "{}/{}/{}", PICS_DIR, chamber, &name),
