@@ -62,7 +62,7 @@ fn wiki_data_code(chamber: &Chamber) -> String {
  LIMIT 180
 */
 /// The district request is omitted for chambers with no districts (some Legislative Councils).
-pub async fn get_wikidata_json(client: &reqwest::Client, chamber: &Chamber) -> anyhow::Result<NamedTempFile> {
+pub async fn get_wikidata_json(client: &reqwest::Client, chamber: Chamber) -> anyhow::Result<NamedTempFile> {
     let fields = format!("?mp ?mpLabel{} ?assumedOffice",
                          if chamber.has_regions() {" ?districtLabel"} else {""} );
     let query_string = format!("SELECT {}{}{}{}{}{}{}{}{}{}{}{}{}",
@@ -139,7 +139,7 @@ impl FileThatIsSomewhere {
 /// Download all the non-authoritative data.
 /// If the client is None, it does no downloading; if the client is present, it is used for downloads.
 pub async fn get_photos_and_summaries(
-    json_file: &str, chamber: &Chamber,
+    json_file: &str, chamber: Chamber,
     opt_client: Option<&reqwest::Client>,
 ) -> anyhow::Result<HashMap<Electorate, Vec<MPNonAuthoritative>>> {
     println!("Getting photos and summaries - got json file {}", json_file);
@@ -300,7 +300,7 @@ pub async fn get_photos_and_summaries(
         // println!("Found MP {mp:?}");
 
         let electorate = Electorate {
-            chamber: *chamber,
+            chamber,
             region: electorate_name
         };
         results.entry(electorate)
@@ -315,7 +315,7 @@ pub async fn get_photos_and_summaries(
 /// We may at some point have a problem with capitalisation for electorate names, but for the 
 /// moment we don't.
 /// TODO deal appropriately with chambers that don't have a region, e.g. NSW/SA Legislative Council.
-fn canonicalise_electorate_name(chamber: &Chamber, region: &str) -> anyhow::Result<Option<String>> {
+fn canonicalise_electorate_name(chamber: Chamber, region: &str) -> anyhow::Result<Option<String>> {
     match chamber {
         Chamber::Australian_Senate => Ok(Some(State::try_from(region.to_uppercase().as_str())?.to_string())),
         _ => Ok(Some(region.to_string())),
@@ -325,8 +325,7 @@ fn canonicalise_electorate_name(chamber: &Chamber, region: &str) -> anyhow::Resu
 /// Store a pretty-printed text file with the attribution info, into the directory in which the
 /// image will be posted.
 async fn store_attr_txt(img_data: &ImageInfo, path: &String, wikipedia_title: &str) -> anyhow::Result<File> {
-    std::fs::create_dir_all(crate::parse_util::TEMP_DIR)?;
-    let mut attribution_file = NamedTempFile::new_in(crate::parse_util::TEMP_DIR)?;
+    let mut attribution_file = NamedTempFile::new()?;
     const UNKNOWN: &str = "Unknown";
     let short_name: String = match &img_data.attribution_short_name {
         Some(name) => name.to_string(),
@@ -336,7 +335,7 @@ async fn store_attr_txt(img_data: &ImageInfo, path: &String, wikipedia_title: &s
         Some(name) => name.to_string(),
         None => UNKNOWN.to_string(),
     };
-    let attr = format!(
+    write!(attribution_file,
         "Artist: {}. License: {} via Wikimedia Commons.\n",
         artist,
         if let Some(attribution_url) = &img_data.attribution_url {
@@ -344,9 +343,8 @@ async fn store_attr_txt(img_data: &ImageInfo, path: &String, wikipedia_title: &s
         } else {
             short_name
         }
-    );
-    attribution_file.write_all(attr.as_bytes())?;
-    attribution_file.flush()?;
+    )?;
+    // attribution_file.flush()?;
     let filepath = format!("{}/{}_{}.{}", path, wikipedia_title, "attr", "txt");
     Ok(attribution_file.persist(&filepath)?)
 }

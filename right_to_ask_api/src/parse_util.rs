@@ -3,15 +3,11 @@
 use std::fs::File;
 use std::io::Write;
 use anyhow::anyhow;
-use mysql_common::frunk::path::PathTraverser;
 use regex::Regex;
 use reqwest::Client;
 use tempfile::NamedTempFile;
 use reqwest::header::{HeaderMap, ACCEPT, USER_AGENT, CONTENT_TYPE};
-use serde_json::Value;
 
-/// Temporary file directory. Should be in same filesystem as MP_SOURCE.
-pub(crate) const TEMP_DIR : &'static str = "data/temp";
 const DD_USER_AGENT : &'static str = "right-to-ask/api; https://www.democracydevelopers.org.au/; info@democracydevelopers.org.au";
 pub const WIKI_DATA_BASE_URL : &'static str = "https://query.wikidata.org/sparql?query=";
 
@@ -19,8 +15,7 @@ pub const WIKI_DATA_BASE_URL : &'static str = "https://query.wikidata.org/sparql
 pub(crate) async fn download_to_file(url:&str) -> anyhow::Result<NamedTempFile> {
     let url = url.replace("http://", "https://");
     println!("Downloading {}",url);
-    std::fs::create_dir_all(TEMP_DIR)?;
-    let mut file = NamedTempFile::new_in(TEMP_DIR)?;
+    let mut file = NamedTempFile::new()?;
     let response = reqwest::get(url).await?;
     let content= response.bytes().await?;
     file.write_all(&content)?;
@@ -34,8 +29,7 @@ pub(crate) async fn download_to_file(url:&str) -> anyhow::Result<NamedTempFile> 
 pub(crate) async fn download_wikipedia_file(insecure_url:&str, client: &Client) -> anyhow::Result<NamedTempFile> {
     let url = insecure_url.replace("http://", "https://");
     println!("Downloading wiki data to file from {}", &url);
-    std::fs::create_dir_all(TEMP_DIR)?;
-    let mut file = NamedTempFile::new_in(TEMP_DIR)?;
+    let mut file = NamedTempFile::new()?;
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, DD_USER_AGENT.parse().unwrap());
     headers.insert(ACCEPT, "application/json".parse().unwrap());
@@ -53,8 +47,7 @@ pub(crate) async fn download_wikipedia_file(insecure_url:&str, client: &Client) 
 /// Download a json file using a wikidata query.
 pub(crate) async fn download_wiki_data_to_file(query:&str, client: &Client) -> anyhow::Result<NamedTempFile> {
     println!("Downloading wiki data to json file from query");
-    std::fs::create_dir_all(TEMP_DIR)?;
-    let mut file = NamedTempFile::new_in(TEMP_DIR)?;
+    let mut file = NamedTempFile::new()?;
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, DD_USER_AGENT.parse()?);
     headers.insert(ACCEPT, "application/json".parse()?);
@@ -73,9 +66,9 @@ pub(crate) async fn download_wiki_data_to_file(query:&str, client: &Client) -> a
 /// Read the json data stored in file; return a tuple of Name, district, ID
 pub async  fn parse_wiki_data(file: File) -> anyhow::Result<Vec<(String, Option<String>, String)>> {
     let mut mps_data : Vec<(String, Option<String>, String)> = Vec::new();
-    let raw : Value = serde_json::from_reader(file)?;
+    let raw : serde_json::Value = serde_json::from_reader(file)?;
     println!("Got data from file: {}", raw.to_string());
-    let raw : &Vec<Value> = raw.get("results")
+    let raw : &Vec<serde_json::Value> = raw.get("results")
         .and_then(|r| r.get("bindings"))
         .and_then(|v| v.as_array())
         .ok_or_else(||anyhow!("Can't parse wiki data json."))?;
