@@ -327,22 +327,19 @@ fn canonicalise_electorate_name(chamber: Chamber, region: &str) -> anyhow::Resul
 async fn store_attr_txt(img_data: &ImageInfo, path: &String, wikipedia_title: &str) -> anyhow::Result<File> {
     let mut attribution_file = NamedTempFile::new()?;
     const UNKNOWN: &str = "Unknown";
-    let short_name: String = match &img_data.attribution_short_name {
-        Some(name) => name.to_string(),
-        None => UNKNOWN.to_string(),
+    let short_name: &str = match &img_data.attribution_short_name {
+        Some(name) => name,
+        None => UNKNOWN,
     };
-    let artist: String = match &img_data.artist {
-        Some(name) => name.to_string(),
-        None => UNKNOWN.to_string(),
+    let artist: &str = match &img_data.artist {
+        Some(name) => name,
+        None => UNKNOWN,
     };
     write!(attribution_file,
-        "Artist: {}. License: {} via Wikimedia Commons.\n",
+        "Artist: {}. License: {} {} via Wikimedia Commons.\n",
         artist,
-        if let Some(attribution_url) = &img_data.attribution_url {
-            format!("{} {}", short_name, attribution_url)
-        } else {
-            short_name
-        }
+        short_name,
+        img_data.attribution_url.as_ref().map(String::as_str).unwrap_or(""),
     )?;
     // attribution_file.flush()?;
     let filepath = format!("{}/{}_{}.{}", path, wikipedia_title, "attr", "txt");
