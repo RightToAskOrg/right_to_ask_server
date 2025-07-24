@@ -148,12 +148,12 @@ pub async fn get_photos_and_summaries(
 
     for (name, electorate_name, id) in found {
         // Make a directory labelled with the electorate for data that will be used to find the picture, but not used after creating MPs.json.
-
-        // FIXME Do something more intelligent than just setting to None if we got an error.
         let electorate_name = electorate_name.and_then(|e| canonicalise_electorate_name(chamber, &e).unwrap_or(None));
+        if chamber.has_regions() && electorate_name.is_none() {println!("Warning: missing region for {name} in {chamber}")};
+
         let directory : String = match &electorate_name {
-            Some(name) => format!( "{}/{}/{}", PICS_DIR, chamber, &name),
-            None =>  format!( "{}/{}", PICS_DIR, chamber)
+            Some(electorate_name) => format!( "{}/{}/{}", PICS_DIR, chamber, &electorate_name),
+            None => format!("{}/{}", PICS_DIR, chamber)
         };
 
         let non_authoritative_path = format!(
@@ -173,7 +173,6 @@ pub async fn get_photos_and_summaries(
         );
         std::fs::create_dir_all(&uploadable_path)?;
 
-        // FIXME - clean this up and make the different names for directories cleaner.
         // Make the MP data structure into which all this info will be stored.
         // Note that not all chambers have individual electorates.
         let mut mp: MPNonAuthoritative = MPNonAuthoritative {
@@ -251,22 +250,20 @@ pub async fn get_photos_and_summaries(
                     // Add the wikipedia summary.
                     mp.wikipedia_summary = page_data
                         .get("extract")
-                        .and_then(|s| s.as_str())
-                        .map(|s| strip_quotes(s));
+                        .and_then(serde_json::Value::as_str)
+                        .map(strip_quotes);
                     let image_name = page_data
                         .get("pageimage")
-                        .map(|s| s.to_string().replace("\"", ""));
+                        .and_then(serde_json::Value::as_str)
+                        .map(strip_quotes);
                     if !image_name.is_none() {
                         println!("found image name {:?} for {}", image_name.as_ref(), title);
                     }
 
                     if let Some(filename_with_quotes) = image_name {
                         let filename = byte_serialize(strip_quotes(&filename_with_quotes).as_bytes()).collect::<String>();
-                        let image_metadata_url: String = format!(
-                            "{EN_WIKIPEDIA_API_URL}{WIKIPEDIA_IMAGE_INFO_REQUEST}{}",
-                            // Get rid of "
-                            filename
-                        );
+                        let image_metadata_url: String =
+                            format!("{EN_WIKIPEDIA_API_URL}{WIKIPEDIA_IMAGE_INFO_REQUEST}{filename}");
                         let image_metadata_file = FileThatIsSomewhere::get(
                             &image_metadata_url,
                             opt_client,
@@ -276,7 +273,7 @@ pub async fn get_photos_and_summaries(
                         // First get the image metadata
                         if let Some(img_data) = parse_image_info(title, image_metadata_file.as_json()?) {
                             // Store the attribution in the appropriate directory, as a text file.
-                            store_attr_txt(&img_data, &uploadable_path, title).await?;
+                            store_attr_txt(&img_data, &uploadable_path, title)?;
 
                             // Then download the actual file
                             let image_file = FileThatIsSomewhere::get(
@@ -324,7 +321,7 @@ fn canonicalise_electorate_name(chamber: Chamber, region: &str) -> anyhow::Resul
 
 /// Store a pretty-printed text file with the attribution info, into the directory in which the
 /// image will be posted.
-async fn store_attr_txt(img_data: &ImageInfo, path: &String, wikipedia_title: &str) -> anyhow::Result<File> {
+fn store_attr_txt(img_data: &ImageInfo, path: &String, wikipedia_title: &str) -> anyhow::Result<File> {
     let mut attribution_file = NamedTempFile::new()?;
     const UNKNOWN: &str = "Unknown";
     let short_name: &str = match &img_data.attribution_short_name {
