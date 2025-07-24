@@ -314,11 +314,11 @@ pub async fn get_photos_and_summaries(
 /// For the senate, change the full state/territory name to its 2-3 char short name.
 /// We may at some point have a problem with capitalisation for electorate names, but for the 
 /// moment we don't.
-/// TODO deal appropriately with chambers that don't have a region, e.g. NSW/SA Legislative Council.
 fn canonicalise_electorate_name(chamber: Chamber, region: &str) -> anyhow::Result<Option<String>> {
-    match chamber {
-        Chamber::Australian_Senate => Ok(Some(State::try_from(region.to_uppercase().as_str())?.to_string())),
-        _ => Ok(Some(region.to_string())),
+    match (chamber, region) {
+        (Chamber::Australian_Senate, _) => Ok(Some(State::try_from(region.to_uppercase().as_str())?.to_string())),
+        (_, "") => Ok(None),
+        (_, _) => Ok(Some(region.to_string())),
     }
 }
 
