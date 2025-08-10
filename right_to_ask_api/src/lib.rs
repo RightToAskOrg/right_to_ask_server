@@ -16,6 +16,7 @@ pub mod censorship;
 pub mod minister;
 mod mp_non_authoritative;
 mod parse_non_authoritative_mp_data;
+pub mod parse_current_bills;
 
 #[cfg(test)]
 mod tests {
