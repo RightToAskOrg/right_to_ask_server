@@ -10,13 +10,17 @@ use crate::regions::{Chamber, Electorate, State};
 use std::collections::{HashMap};
 use std::fs::File;
 use std::io::Write;
+use std::path::PathBuf;
+use reqwest::Client;
 use tempfile::NamedTempFile;
 use url::form_urlencoded::byte_serialize;
+use crate::mp::MP;
 
 pub const MP_SOURCE: &'static str = "data/MP_source";
 pub const NON_AUTHORITATIVE_DIR: &'static str = "non_authoritative_data";
 pub const PICS_DIR: &'static str = "pics";
 
+/// Wikidata and Wikipedia-related strings
 const WIKIPEDIA_API_URL: &str = "https://www.wikidata.org/w/api.php?";
 const EN_WIKIPEDIA_API_URL: &str = "https://en.wikipedia.org/w/api.php?";
 const WIKIPEDIA_SITE_LINKS_REQUEST: &str =
@@ -26,6 +30,42 @@ const WIKIPEDIA_IMAGE_INFO_REQUEST: &str =
     "action=query&prop=imageinfo&iiprop=extmetadata|url&format=json&titles=File:";
 // How to get a wikipedia page link from a pageID.
 const WIKIPEDIA_PAGE_FROM_ID: &str = "https://en.wikipedia.org/?curid=";
+const WIKIDATA_SUFFIX : &'static str = "_wikidata.json";
+
+/// OAF-related strings
+const THEY_VOTE_FOR_YOU_TAG: &'static str = "they_vote_for_you";
+const THEY_VOTE_FOR_YOU_URL : &'static str = "https://theyvoteforyou.org.au/people";
+const REPRESENTATIVES: &'static str = "representatives";
+const SENATE: &'static str = "senate";
+
+/// Pull data from wikidata and store it in temp files.
+pub async fn store_wiki_data(dir: &PathBuf, client : &Client, chamber: Chamber) -> anyhow::Result<()> {
+    let wiki_data_file = get_wikidata_json(&client, chamber).await?;
+    let wiki_data_file_path = dir.join(chamber.to_string() + WIKIDATA_SUFFIX);
+    wiki_data_file.persist(&wiki_data_file_path)?;
+    get_photos_and_summaries(wiki_data_file_path.to_str().unwrap(), chamber, Some(&client)).await?;
+    Ok(())
+}
+
+/// Add non-authoritative data, including Wikipedia data and They Vote For You links, to the (authoritative)
+/// MP list.
+pub async fn add_non_authoritative(mps: &mut Vec<MP>, dir: &PathBuf, chamber: Chamber) -> anyhow::Result<()> {
+    let mut non_authoritative= get_photos_and_summaries(
+        dir.join(chamber.to_string() + WIKIDATA_SUFFIX).to_str().unwrap(),
+        chamber,
+        None).await?;
+
+    for mp in mps {
+        if let Some(non_authoritative_mps) = non_authoritative.get_mut(&mp.electorate) {
+            let matches: Vec<usize> = (0..non_authoritative_mps.len()).into_iter().filter(
+                |i| non_authoritative_mps[*i].name.contains(&mp.surname)).collect();
+            if matches.len() == 1 {
+                mp.non_authoritative = Some(non_authoritative_mps.remove(matches[0]));
+            }
+        }
+    }
+    Ok(())
+}
 
 fn wiki_data_code(chamber: &Chamber) -> String {
     match chamber {
@@ -47,6 +87,7 @@ fn wiki_data_code(chamber: &Chamber) -> String {
     }
 }
 
+
 /// Get wikidata download for all the MPs in the given chamber.
 /// An example for pasting into Wikidata, with districts:
 /* SELECT ?mp ?mpLabel ?districtLabel ?assumedOffice where {
@@ -62,7 +103,7 @@ fn wiki_data_code(chamber: &Chamber) -> String {
  LIMIT 180
 */
 /// The district request is omitted for chambers with no districts (some Legislative Councils).
-pub async fn get_wikidata_json(client: &reqwest::Client, chamber: Chamber) -> anyhow::Result<NamedTempFile> {
+async fn get_wikidata_json(client: &reqwest::Client, chamber: Chamber) -> anyhow::Result<NamedTempFile> {
     let fields = format!("?mp ?mpLabel{} ?assumedOffice",
                          if chamber.has_regions() {" ?districtLabel"} else {""} );
     let query_string = format!("SELECT {}{}{}{}{}{}{}{}{}{}{}{}{}",
@@ -136,9 +177,10 @@ impl FileThatIsSomewhere {
         })?)
     }
 }
+
 /// Download all the non-authoritative data.
 /// If the client is None, it does no downloading; if the client is present, it is used for downloads.
-pub async fn get_photos_and_summaries(
+async fn get_photos_and_summaries(
     json_file: &str, chamber: Chamber,
     opt_client: Option<&reqwest::Client>,
 ) -> anyhow::Result<HashMap<Electorate, Vec<MPNonAuthoritative>>> {
@@ -175,10 +217,13 @@ pub async fn get_photos_and_summaries(
 
         // Make the MP data structure into which all this info will be stored.
         // Note that not all chambers have individual electorates.
+        // Set up They Vote For You links for federal MPs; otherwise, empty.
+        let they_vote_for_you_link = try_they_vote_for_you_link(chamber, &electorate_name, &name);
         let mut mp: MPNonAuthoritative = MPNonAuthoritative {
             name: name.clone(),
             electorate_name: electorate_name.clone(),
             path: directory,
+            links: they_vote_for_you_link,
             ..Default::default()
         };
 
@@ -206,11 +251,7 @@ pub async fn get_photos_and_summaries(
             &wikipedia_entity_data,
             &["entities", &id, "sitelinks", "enwiki", "title"],
         );
-        println!(
-            "found title {} for url {}",
-            opt_title_new.unwrap_or("NONE"),
-            url
-        );
+        // println!( "found title {} for url {}", opt_title_new.unwrap_or("NONE"), url );
 
         if let Some(title) = opt_title_new {
             // Now get their summary & image info using their title.
@@ -256,9 +297,7 @@ pub async fn get_photos_and_summaries(
                         .get("pageimage")
                         .and_then(serde_json::Value::as_str)
                         .map(strip_quotes);
-                    if !image_name.is_none() {
-                        println!("found image name {:?} for {}", image_name.as_ref(), title);
-                    }
+                    // if image_name.is_some() {println!("found image name {:?} for {}", image_name.as_ref(), title);}
 
                     if let Some(filename_with_quotes) = image_name {
                         let filename = byte_serialize(strip_quotes(&filename_with_quotes).as_bytes()).collect::<String>();
@@ -305,6 +344,37 @@ pub async fn get_photos_and_summaries(
             .push(mp); 
     }
     Ok(results)
+}
+
+fn try_they_vote_for_you_link(chamber: Chamber, electorate: &Option<String>, name: &str) -> HashMap<String, String> {
+    let mut results = HashMap::new();
+    if let Some(electorate) = electorate {
+        if chamber == Chamber::Australian_House_Of_Representatives {
+            results.insert(THEY_VOTE_FOR_YOU_TAG.to_string(),
+                           format!("{THEY_VOTE_FOR_YOU_URL}/{REPRESENTATIVES}/{}/{}",
+                                   electorate.replace(" ", "_"),
+                                   name.replace(" ", "_")));
+        } else if chamber == Chamber::Australian_Senate {
+            let state = State::try_from(electorate.to_uppercase().as_str());
+            if let Ok(state) = state {
+                let state_string: &str = match state {
+                    State::ACT => "act",
+                    State::QLD => "queensland",
+                    State::NSW => "nsw",
+                    State::NT => "nt",
+                    State::SA => "sa",
+                    State::TAS => "tasmania",
+                    State::VIC => "victoria",
+                    State::WA => "wa"
+                };
+                results.insert(THEY_VOTE_FOR_YOU_TAG.to_string(),
+                               format!("{THEY_VOTE_FOR_YOU_URL}/{SENATE}/{}/{}",
+                                   state_string,
+                                   name.replace(" ", "_")));
+            }
+        }
+    }
+    results
 }
 
 /// Deal with possible discrepancies between wikipedia region names and authoritative ones.

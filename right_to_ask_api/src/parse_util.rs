@@ -28,7 +28,7 @@ pub(crate) async fn download_to_file(url:&str) -> anyhow::Result<NamedTempFile> 
 /// except for the URL and the use of get instead of post.
 pub(crate) async fn download_wikipedia_file(insecure_url:&str, client: &Client) -> anyhow::Result<NamedTempFile> {
     let url = insecure_url.replace("http://", "https://");
-    println!("Downloading wiki data to file from {}", &url);
+    // println!("Downloading wiki data to file from {}", &url);
     let mut file = NamedTempFile::new()?;
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, DD_USER_AGENT.parse().unwrap());
@@ -46,7 +46,7 @@ pub(crate) async fn download_wikipedia_file(insecure_url:&str, client: &Client) 
 
 /// Download a json file using a wikidata query.
 pub(crate) async fn download_wiki_data_to_file(query:&str, client: &Client) -> anyhow::Result<NamedTempFile> {
-    println!("Downloading wiki data to json file from query");
+    // println!("Downloading wiki data to json file from query");
     let mut file = NamedTempFile::new()?;
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, DD_USER_AGENT.parse()?);
@@ -67,7 +67,7 @@ pub(crate) async fn download_wiki_data_to_file(query:&str, client: &Client) -> a
 pub async  fn parse_wiki_data(file: File) -> anyhow::Result<Vec<(String, Option<String>, String)>> {
     let mut mps_data : Vec<(String, Option<String>, String)> = Vec::new();
     let raw : serde_json::Value = serde_json::from_reader(file)?;
-    println!("Got data from file: {}", raw.to_string());
+    // println!("Got data from file: {}", raw.to_string());
     let raw : &Vec<serde_json::Value> = raw.get("results")
         .and_then(|r| r.get("bindings"))
         .and_then(|v| v.as_array())
@@ -76,10 +76,10 @@ pub async  fn parse_wiki_data(file: File) -> anyhow::Result<Vec<(String, Option<
        let id_url = get_nested_json(&mp, &["mp", "value"]).expect("Can't find mp url in json");
        let base_url_regexp = Regex::new(r"http://www.wikidata.org/entity/(?<QID>\w+)").unwrap();
        let id = &base_url_regexp.captures(id_url).expect("Can't extract ID from url")["QID"];
-       println!("Got ID {}", id);
+       // println!("Got ID {}", id);
        let district = get_nested_json(&mp, &["districtLabel", "value"]).map(|x| x.to_string());
        let name = get_nested_json(&mp, &["mpLabel", "value"]).expect("Can't find mp's name in json");
-       println!("Found MP id = {}, name = {}", id, name);
+       // println!("Found MP id = {}, name = {}", id, name);
 
        mps_data.push((name.to_string(), district, id.to_string()));
     }

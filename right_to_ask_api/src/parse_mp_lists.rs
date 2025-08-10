@@ -17,7 +17,7 @@ use std::path::{PathBuf, Path};
 use std::fs::File;
 use crate::mp::{MP, MPSpec};
 use crate::regions::{Electorate, Chamber, State, RegionContainingOtherRegions};
-use crate::parse_non_authoritative_mp_data::{get_wikidata_json, get_photos_and_summaries};
+use crate::parse_non_authoritative_mp_data::{add_non_authoritative, store_wiki_data};
 use std::str::FromStr;
 use anyhow::anyhow;
 use std::collections::{HashMap, HashSet};
@@ -29,11 +29,9 @@ use crate::parse_pdf_util::{parse_pdf_to_strings_with_same_font, extract_string}
 use regex::Regex;
 use calamine::{open_workbook, Xls, Reader, Xlsx};
 use encoding_rs_io::DecodeReaderBytesBuilder;
-use reqwest::Client;
 use crate::parse_util::{download_to_file};
 
 pub const MP_SOURCE : &'static str = "data/MP_source";
-const WIKIDATA_SUFFIX : &'static str = "_wikidata.json";
 
 fn parse_australian_senate(file : File) -> anyhow::Result<Vec<MP>> {
     let transcoded = DecodeReaderBytesBuilder::new().encoding(Some(encoding_rs::WINDOWS_1252)).build(file);
@@ -695,15 +693,6 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     store_wiki_data(&dir, &client, Chamber::ACT_Legislative_Assembly).await?;
 
     Ok(())
-
-}
-
-async fn store_wiki_data(dir: &PathBuf, client : &Client, chamber: Chamber) -> anyhow::Result<()> {
-    let wiki_data_file = get_wikidata_json(&client, chamber).await?;
-    let wiki_data_file_path = dir.join(chamber.to_string() + WIKIDATA_SUFFIX);
-    wiki_data_file.persist(&wiki_data_file_path)?;
-    get_photos_and_summaries(wiki_data_file_path.to_str().unwrap(), chamber, Some(&client)).await?;
-    Ok(())
 }
 
 /// Create "data/MP_source/MPs.json" from the source files downloaded by update_mp_list_of_files(). Second of the two stages for generating MPs.json
@@ -817,25 +806,5 @@ pub async fn create_mp_list() -> anyhow::Result<()> {
     let vic_districts = hard_coded_victorian_regions(); // parse_vic_district_list(&dir.join("VicDistrictList.html"))?;
     let spec = MPSpec { mps, federal_electorates_by_state, vic_districts };
     serde_json::to_writer(File::create(dir.join("MPs.json"))?,&spec)?;
-    Ok(())
-}
-
-/// TODO call this with 'found'
-/// FIXME at the moment this won't work for chambers that don't have electorates.
-async fn add_non_authoritative(mps: &mut Vec<MP>, dir: &PathBuf, chamber: Chamber) -> anyhow::Result<()> {
-    let mut non_authoritative= get_photos_and_summaries(
-        dir.join(chamber.to_string() + WIKIDATA_SUFFIX).to_str().unwrap(),
-        chamber,
-        None).await?;
-
-    for mp in mps {
-        if let Some(non_authoritative_mps) = non_authoritative.get_mut(&mp.electorate) {
-            let matches: Vec<usize> = (0..non_authoritative_mps.len()).into_iter().filter(
-                |i| non_authoritative_mps[*i].name.contains(&mp.surname)).collect();
-            if matches.len() == 1 {
-                mp.non_authoritative = Some(non_authoritative_mps.remove(matches[0]));
-            }
-        }
-    }
     Ok(())
 }
