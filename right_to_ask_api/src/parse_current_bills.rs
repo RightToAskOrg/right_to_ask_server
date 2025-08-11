@@ -4,11 +4,14 @@
 
 
 use std::collections::HashMap;
+use std::cmp;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use anyhow::{anyhow, Context};
+use futures::StreamExt;
+use itertools::Itertools;
 use scraper::{ElementRef, Html, Selector};
 use serde::{Serialize,Deserialize};
 use crate::committee::CommitteeInfo;
@@ -24,6 +27,7 @@ pub struct CurrentBill {
     title : String,
     id : String,
     url : String,
+    summary_text : String
 }
 
 /// Parse bills html file
@@ -75,13 +79,23 @@ fn parse_bills_main_html_file(path:&Path,base_url:&str) -> anyhow::Result<Vec<Cu
             let id = main_page_url.trim_start_matches(BILLS_URL_PREFIX).to_string();
             let title = bill_headers.text().collect::<String>();
             let second_div = divs.next().ok_or_else(|| anyhow!("Missing second div"))?;
-            let date = second_div.select(&Selector::parse("dl > dt").unwrap()).next().ok_or_else(|| anyhow!("Missing date"))?;
-            println!("This should say Date: {}", date.text().collect::<String>());
-            println!("Found bill {}\n at url {}\n with id {}", title, main_page_url, id);
+            let list = second_div.select(&Selector::parse("dl").unwrap()).next().ok_or_else(|| anyhow!("Missing date"))?;
+            let terms : Vec<_> = list.select(&Selector::parse("dt").unwrap()).collect();
+            let descriptions : Vec<_> = list.select(&Selector::parse("dd").unwrap()).collect();
+            let mut summary_text = String::new();
+            let length = cmp::min(terms.len(), descriptions.len()) ;
+            for i in 0..length {
+                let term = terms[i].text().collect::<Vec<&str>>();
+                if term.first().unwrap().eq(&"Summary") {
+                   summary_text = descriptions[i].text().collect::<Vec<&str>>().iter().map(|s| s.trim()).join(" ");
+                }
+            }
+            println!("Found bill {}\n at url {}\n with id {}\n and description {}", title, main_page_url, id, &summary_text);
             let bill = CurrentBill {
                 title,
                 url: format!("{BILLS_SOURCE}{BILLS_URL_PREFIX}{}", &id),
                 id,
+                summary_text
             };
             bills.push(bill);
         }
