@@ -26,8 +26,10 @@ const FEDERAL_BILLS_FILE : DownloadableFile<'static> = DownloadableFile{ url: BI
 pub struct CurrentBill {
     title : String,
     id : String,
-    url : String,
+    official_page : String,
     summary_text : String,
+    bill : String,
+    explanatory : String,
     category : String,
     sponsor: String,
     // TODO status could be an enum, matching the enum in the json config.
@@ -72,18 +74,19 @@ pub struct CurrentBill {
 fn parse_bills_main_html_file(path:&Path,base_url:&str) -> anyhow::Result<Vec<CurrentBill>> {
     let mut bills = Vec::new();
     let html = scraper::Html::parse_document(&std::fs::read_to_string(path)?);
-    if let Some(list) = html.select(&Selector::parse(r#"ul[class="search-filter-results"]"#).unwrap()).next() {
+    let search_results_selector =  Selector::parse(r#"ul[class="search-filter-results"]"#).unwrap();
+    let mut info_div = html.select(&search_results_selector);
+    if let Some(list) = info_div.next() {
         for tr in list.select(&Selector::parse("li").unwrap()) {
-            // For now, let's just see if we can get the title.
             let select_div = Selector::parse("div").unwrap();
-            let mut divs = tr.select(&select_div);
-            let first_div = divs.next().ok_or_else(|| anyhow!("Missing first div"))?;
-            let bill_headers = first_div.select(&Selector::parse("h4 > a").unwrap()).next().ok_or(anyhow!("Missing headers"))?;
+            let mut content_divs = tr.select(&select_div);
+            let bill_header_div = content_divs.next().ok_or_else(|| anyhow!("Missing bill header div"))?;
+            let bill_headers = bill_header_div.select(&Selector::parse("h4 > a").unwrap()).next().ok_or(anyhow!("Missing headers"))?;
             let main_page_url = bill_headers.value().attr("href").ok_or_else(||anyhow!("Could not find bill href in main bills html file"))?.to_string();
             let id = main_page_url.trim_start_matches(BILLS_URL_PREFIX).to_string();
             let title = bill_headers.text().collect::<String>();
-            let second_div = divs.next().ok_or_else(|| anyhow!("Missing second div"))?;
-            let list = second_div.select(&Selector::parse("dl").unwrap()).next().ok_or_else(|| anyhow!("Missing date"))?;
+            let data_div = content_divs.next().ok_or_else(|| anyhow!("Missing second div"))?;
+            let list = data_div.select(&Selector::parse("dl").unwrap()).next().ok_or_else(|| anyhow!("Couldn't find metadata for bill."))?;
             let terms : Vec<_> = list.select(&Selector::parse("dt").unwrap()).collect();
             let descriptions : Vec<_> = list.select(&Selector::parse("dd").unwrap()).collect();
             let mut summary_text = String::new();
@@ -108,16 +111,27 @@ fn parse_bills_main_html_file(path:&Path,base_url:&str) -> anyhow::Result<Vec<Cu
                     status = descriptions[i].text().collect::<Vec<&str>>().iter().map(|s| s.trim()).join(" ");
                 }
             }
-            println!("Found bill {}\n at url {}\n with id {}\n and description {}", title, main_page_url, id, &summary_text);
-            // TODO Add links to bill text and explanatory memorandum.
-            // Align terminology with AoR config. (v1.3?)
+            let mut bill : String = String::new();
+            let mut explanatory : String = String::new();
+            let mut extras = data_div.select(&Selector::parse("p.extra").unwrap()).next().ok_or_else(|| anyhow!("Missing extra information for bill id {}", &id))?;
+            for item in extras.select(&Selector::parse("a").unwrap()) {
+                if item.text().collect::<String>().eq("Bill") {
+                    bill = item.value().attr("href").ok_or(anyhow!("Could not find bill link url in bill id {}", &id))?.to_string();
+                }
+                if item.text().collect::<String>().eq("Explanatory Memorandum") {
+                    explanatory = item.value().attr("href").ok_or(anyhow!("Could not find explanatory memorandum link url in bill id {}", &id))?.to_string();
+                }
+            }
+            println!("Found bill {} with id {}", title, id);
             let bill = CurrentBill {
                 title,
                 category,
                 sponsor,
-                url: format!("{APH_ROOT_URL}{BILLS_URL_PREFIX}{}", &id),
+                official_page : format!("{APH_ROOT_URL}{BILLS_URL_PREFIX}{}", &id),
                 id,
                 summary_text,
+                bill,
+                explanatory,
                 status
             };
             bills.push(bill);
