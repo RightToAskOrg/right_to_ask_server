@@ -16,12 +16,14 @@ use crate::parse_util::{download_to_file, relative_url};
 use crate::regions::Jurisdiction;
 
 pub const BILLS_SOURCE : &'static str = "data/current_bills";
+const APH_ROOT_URL : &'static str = "https://www.aph.gov.au";
+const BILLS_URL_PREFIX: &'static str = "/Parliamentary_Business/Bills_Legislation/Bills_Search_Results/Result?bId=";
 
 #[derive(Serialize,Deserialize,Debug)]
 pub struct CurrentBill {
-    // TODO Fix up relevant bill data.
     title : String,
-    main_page_url : String,
+    id : String,
+    url : String,
 }
 
 /// Parse bills html file
@@ -65,13 +67,21 @@ fn parse_bills_main_html_file(path:&Path,base_url:&str) -> anyhow::Result<Vec<Cu
     if let Some(list) = html.select(&Selector::parse(r#"ul[class="search-filter-results"]"#).unwrap()).next() {
         for tr in list.select(&Selector::parse("li").unwrap()) {
             // For now, let's just see if we can get the title.
-            let bill_headers = tr.select(&Selector::parse("div > h4 > a").unwrap()).next().ok_or(anyhow!("Missing headers"))?;
+            let select_div = Selector::parse("div").unwrap();
+            let mut divs = tr.select(&select_div);
+            let first_div = divs.next().ok_or_else(|| anyhow!("Missing first div"))?;
+            let bill_headers = first_div.select(&Selector::parse("h4 > a").unwrap()).next().ok_or(anyhow!("Missing headers"))?;
             let main_page_url = bill_headers.value().attr("href").ok_or_else(||anyhow!("Could not find bill href in main bills html file"))?.to_string();
+            let id = main_page_url.trim_start_matches(BILLS_URL_PREFIX).to_string();
             let title = bill_headers.text().collect::<String>();
-            println!("Found bill {}\n at url {}", title, main_page_url);
+            let second_div = divs.next().ok_or_else(|| anyhow!("Missing second div"))?;
+            let date = second_div.select(&Selector::parse("dl > dt").unwrap()).next().ok_or_else(|| anyhow!("Missing date"))?;
+            println!("This should say Date: {}", date.text().collect::<String>());
+            println!("Found bill {}\n at url {}\n with id {}", title, main_page_url, id);
             let bill = CurrentBill {
                 title,
-                main_page_url
+                url: format!("{BILLS_SOURCE}{BILLS_URL_PREFIX}{}", &id),
+                id,
             };
             bills.push(bill);
         }
