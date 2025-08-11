@@ -1,33 +1,37 @@
 //! Parse information about upcoming hearings from https://www.aph.gov.au/Parliamentary_Business/Committees/Upcoming_Public_Hearings.
 //!
 
-
-
-use std::collections::HashMap;
 use std::cmp;
 use std::fs::File;
-use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use anyhow::{anyhow, Context};
-use futures::StreamExt;
 use itertools::Itertools;
-use scraper::{ElementRef, Html, Selector};
+use scraper::{Selector};
 use serde::{Serialize,Deserialize};
-use crate::committee::CommitteeInfo;
-use crate::parse_util::{download_to_file, relative_url};
-use crate::regions::Jurisdiction;
+use crate::parse_util::{download_to_file};
 
 pub const BILLS_SOURCE : &'static str = "data/current_bills";
 const APH_ROOT_URL : &'static str = "https://www.aph.gov.au";
 const BILLS_URL_PREFIX: &'static str = "/Parliamentary_Business/Bills_Legislation/Bills_Search_Results/Result?bId=";
+// This seems to be the most it will accept.
+// TODO - Check that the number of results it returns is not greater than this.
+const MAX_RESULTS : u8 = 100;
+// TODO - produce this more elegantly, using MAX_RESULTS.
+// const BILLS_BEFORE_PARLIAMENT_URL: String = format!("https://www.aph.gov.au/Parliamentary_Business/Bills_Legislation/Bills_before_Parliament?ps={}", MAX_RESULTS);
+const BILLS_BEFORE_PARLIAMENT_URL: &'static str = "https://www.aph.gov.au/Parliamentary_Business/Bills_Legislation/Bills_before_Parliament?ps=100";
+const FEDERAL_BILLS_FILE : DownloadableFile<'static> = DownloadableFile{ url: BILLS_BEFORE_PARLIAMENT_URL, filename: "Federal_Bills.html"};
 
 #[derive(Serialize,Deserialize,Debug)]
 pub struct CurrentBill {
     title : String,
     id : String,
     url : String,
-    summary_text : String
+    summary_text : String,
+    category : String,
+    sponsor: String,
+    // TODO status could be an enum, matching the enum in the json config.
+    status : String
 }
 
 /// Parse bills html file
@@ -83,33 +87,43 @@ fn parse_bills_main_html_file(path:&Path,base_url:&str) -> anyhow::Result<Vec<Cu
             let terms : Vec<_> = list.select(&Selector::parse("dt").unwrap()).collect();
             let descriptions : Vec<_> = list.select(&Selector::parse("dd").unwrap()).collect();
             let mut summary_text = String::new();
+            let mut status = String::new();
+            // Some bills have a 'portfolio' which is a department; others (which I think are private members' or senators' bills) have a sponsor.
+            let mut category : String = String::from("private");
+            let mut sponsor : String = String::new();
             let length = cmp::min(terms.len(), descriptions.len()) ;
             for i in 0..length {
                 let term = terms[i].text().collect::<Vec<&str>>();
-                if term.first().unwrap().eq(&"Summary") {
-                   summary_text = descriptions[i].text().collect::<Vec<&str>>().iter().map(|s| s.trim()).join(" ");
+                let term = term.first().ok_or_else(|| anyhow!("Could not find term in bill id {}", &id))?.trim();
+                if term.eq("Summary") {
+                    summary_text = descriptions[i].text().collect::<Vec<&str>>().iter().map(|s| s.trim()).join(" ");
+                }
+                if term.eq("Portfolio") {
+                   category = descriptions[i].text().collect::<Vec<&str>>().iter().map(|s| s.trim()).join(" ");
+                }
+                if term.eq("Sponsor") {
+                    sponsor = descriptions[i].text().collect::<Vec<&str>>().iter().map(|s| s.trim()).join(" ");
+                }
+                if term.eq("Status") {
+                    status = descriptions[i].text().collect::<Vec<&str>>().iter().map(|s| s.trim()).join(" ");
                 }
             }
             println!("Found bill {}\n at url {}\n with id {}\n and description {}", title, main_page_url, id, &summary_text);
+            // TODO Add links to bill text and explanatory memorandum.
+            // Align terminology with AoR config. (v1.3?)
             let bill = CurrentBill {
                 title,
-                url: format!("{BILLS_SOURCE}{BILLS_URL_PREFIX}{}", &id),
+                category,
+                sponsor,
+                url: format!("{APH_ROOT_URL}{BILLS_URL_PREFIX}{}", &id),
                 id,
-                summary_text
+                summary_text,
+                status
             };
             bills.push(bill);
         }
     }
     Ok(bills)
-}
-
-/// Given a base url for a page and an `a` element (probably) containing a href, return (probably) a resolved absolute URL.
-fn rel_url_from_a(base:&str,a:&ElementRef) -> anyhow::Result<Option<String>> {
-    if let Some(rel_url) = a.value().attr("href") {
-        Ok(Some(relative_url(base,rel_url.trim())?))
-    } else {
-        Ok(None)
-    }
 }
 
 /// A file that should be downloaded from `url` and stored in `filename`.
@@ -119,7 +133,6 @@ struct DownloadableFile<'a> {
     filename : &'a str,
 }
 
-const FEDERAL_BILLS_FILE : DownloadableFile<'static> = DownloadableFile{ url: "https://www.aph.gov.au/Parliamentary_Business/Bills_Legislation/Bills_before_Parliament", filename: "Federal_Bills.html"};
 
 impl DownloadableFile<'static> {
     /// Download the file, run the test_function on it, and if it is OK keep the file and return the result of the test.
