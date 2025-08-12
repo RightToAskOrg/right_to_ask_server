@@ -40,6 +40,14 @@ impl TryFrom<&str> for State {
 			b"TAS" => Ok(State::TAS),
 			b"VIC" => Ok(State::VIC),
 			b"WA" => Ok(State::WA),
+			b"AUSTRALIAN CAPITAL TERRITORY" => Ok(State::ACT),
+			b"NEW SOUTH WALES" => Ok(State::NSW),
+			b"NORTHERN TERRITORY" => Ok(State::NT),
+			b"QUEENSLAND" => Ok(State::QLD),
+			b"SOUTH AUSTRALIA" => Ok(State::SA),
+			b"TASMANIA" => Ok(State::TAS),
+			b"VICTORIA" => Ok(State::VIC),
+			b"WESTERN AUSTRALIA" => Ok(State::WA),
 			_ => Err(anyhow!("Invalid state {}",value)),
 		}
 	}
@@ -89,6 +97,29 @@ pub enum Chamber {
 	Tas_Legislative_Council,
 	WA_Legislative_Assembly,
 	WA_Legislative_Council
+}
+
+/// Whether a given chamber has regions.
+impl Chamber {
+    pub fn has_regions(&self) -> bool {
+        match self {
+            Chamber::ACT_Legislative_Assembly => true,
+            Chamber::Australian_House_Of_Representatives => true,
+            Chamber::Australian_Senate => true,
+            Chamber::NSW_Legislative_Assembly => true,
+            Chamber::NSW_Legislative_Council => false,
+            Chamber::NT_Legislative_Assembly => true,
+            Chamber::Qld_Legislative_Assembly => true,
+            Chamber::SA_House_Of_Assembly => true,
+            Chamber::SA_Legislative_Council => false,
+            Chamber::Vic_Legislative_Assembly => true,
+            Chamber::Vic_Legislative_Council => true,
+            Chamber::Tas_House_Of_Assembly => true,
+            Chamber::Tas_Legislative_Council => true,
+            Chamber::WA_Legislative_Assembly => true,
+            Chamber::WA_Legislative_Council => false
+        }
+    }
 }
 
 // Provide Display & to_string() for Chamber enum

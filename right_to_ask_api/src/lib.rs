@@ -14,6 +14,8 @@ pub mod committee;
 pub mod common_file;
 pub mod censorship;
 pub mod minister;
+mod mp_non_authoritative;
+mod parse_non_authoritative_mp_data;
 
 #[cfg(test)]
 mod tests {

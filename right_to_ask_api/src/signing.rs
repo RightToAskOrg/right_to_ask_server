@@ -147,14 +147,8 @@ impl <U> ClientSignedUnparsed<U> {
     #[cfg(test)]
     pub fn sign(message:String,user:&str,private_key:&str,unsigned:U) ->  ClientSignedUnparsed<U> {
         let private_key = base64_decode(&private_key).expect("Could not decode test private key base64 encoding");
-        let private_key = PrivateKeyInfo::from_der(&private_key).expect("Could not decode test private key as PKCS8");
-        let private = private_key.private_key; // TODO should check oid is { 1.3.101.112 }
-        if private.len()!=34 { panic!("Test private key should be 34 bytes, is {} bytes",private.len()) }
-        if !private.starts_with(&[4,32]) { panic!("Test private key should start with 4, 32, actually is {:?}",private) }
-        let secret = SecretKey::from_bytes(&private[2..]).expect("Could not create test secret key");
-        let computed_public : PublicKey = (&secret).into();
-        let signer : ExpandedSecretKey = (&secret).into();
-        let signature = signer.sign(message.as_bytes(),&computed_public);
+        let signer = SigningKey::from_pkcs8_der(&private_key).expect("Could not decode test private key as PKCS8");
+        let signature = signer.sign(message.as_bytes());
         let signature = base64_encode(signature.to_bytes());
         ClientSignedUnparsed{ message,signature,user: user.to_string(),unsigned }
     }
@@ -178,7 +172,7 @@ const DEFAULT_TESTING_SECRET_KEY : &str = "MC4CAQAwBQYDK2VwBCIEICMI7uUJF/iueFO6T
 pub async fn make_test_signed<T:Serialize+DeserializeOwned,U:DeserializeOwned>(user:&str,to_be_signed:&T,unsigned:U) -> ClientSigned<T,U> {
     let message = serde_json::to_string(to_be_signed).expect("Could not serialize to_be_signed");
     let unparsed = ClientSignedUnparsed::sign(message,user,DEFAULT_TESTING_SECRET_KEY,unsigned);
-    unparsed.check_signature().await.unwrap();
+    unparsed.check_signature(false).await.unwrap();
     unparsed.try_into().expect("Could not parse the signed client")
 }
 

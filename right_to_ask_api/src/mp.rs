@@ -11,6 +11,7 @@ use itertools::Itertools;
 use mysql::prelude::Queryable;
 use crate::common_file::MPS;
 use crate::minister::MinisterId;
+use crate::mp_non_authoritative::MPNonAuthoritative;
 use crate::question::OrgID;
 
 /// Information about a MP (or other human elected representative, e.g. senator).
@@ -24,6 +25,7 @@ pub struct MP {
     pub email : String,
     pub role : String,
     pub party : String,
+    pub non_authoritative : Option<MPNonAuthoritative>,
 }
 
 impl MP {
