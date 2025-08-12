@@ -28,14 +28,3 @@ pub struct ImageInfo {
     pub attribution_short_name: Option<String>,
     pub attribution_url: Option<String>, 
 }
-
-impl MPNonAuthoritative {
-    // Just a silly function to see if we can get functions to compile.
-    pub fn has_image(&self) -> bool {
-        self.img_data.is_some()
-    }
-    
-    pub fn has_image2(&self) -> bool {
-        if let Some(_) = self.img_data { true } else { false }
-    }
-}
