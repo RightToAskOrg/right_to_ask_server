@@ -202,7 +202,7 @@ impl ParseAustralianSenatePDFWork {
         } else if text.starts_with(", Senator ") {
             if let Some(surname) = self.history.take() {
                 let first = text.trim_start_matches(", Senator ").trim_start_matches("the Hon ").trim().to_string();
-                if self.current_name.is_some() { return Err(anyhow!("Haven't dealt with current name"))}
+                if self.current_name.is_some() { return Err(anyhow!(format!("Haven't dealt with current name: {:?}", &self.current_name)))}
                 self.current_name=Some((first,surname));
             }
         } else if self.last_was_just_email || text.starts_with("Email:") {
@@ -597,6 +597,8 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     let dir = PathBuf::from_str(MP_SOURCE)?;
     let client = reqwest::Client::new();
 
+    /*
+    FIXME - temporary commentout
     // NT
     let nt_members = download_to_file("https://parliament.nt.gov.au/__data/assets/pdf_file/0004/1457113/MASTER-15th-Legislative-Assembly-List-of-Members-for-webpage-March-2025.pdf").await?;
     parse_nt_la_pdf(nt_members.path())?;
@@ -649,7 +651,8 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     parse_qld_parliament(qld_members.path())?;
     qld_members.persist(dir.join(Chamber::Qld_Legislative_Assembly.to_string()+".xls"))?;
     store_wiki_data(&dir, &client, Chamber::Qld_Legislative_Assembly).await?;
-
+    */
+    
     // Federal CSVs.
     let house_reps = download_to_file("https://www.aph.gov.au/-/media/03_Senators_and_Members/Address_Labels_and_CSV_files/FamilynameRepsCSV.csv").await?;
     let (australian_house_reps_res,_federal_electorates_by_state) = parse_australian_house_reps(house_reps.reopen()?)?;
@@ -669,6 +672,8 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     store_wiki_data(&dir, &client, Chamber::Australian_House_Of_Representatives).await?;
     store_wiki_data(&dir, &client, Chamber::Australian_Senate).await?;
 
+    /*
+    FIXME - temporary commentout
     // NSW
     let la = download_to_file("https://www.parliament.nsw.gov.au/_layouts/15/NSWParliament/memberlistservice.aspx?members=LA&format=Excel").await?;
     parse_nsw_la(la.reopen()?)?;
@@ -684,6 +689,8 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     parse_act_la(la.path())?;
     la.persist(dir.join(Chamber::ACT_Legislative_Assembly.to_string()+".html"))?;
     store_wiki_data(&dir, &client, Chamber::ACT_Legislative_Assembly).await?;
+    
+     */
 
     Ok(())
 }
