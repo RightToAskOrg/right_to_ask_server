@@ -2,10 +2,7 @@
 //! derived in parse_mp-lists.
 //!
 use crate::mp_non_authoritative::{ImageInfo, MPNonAuthoritative};
-use crate::parse_util::{
-    download_wiki_data_to_file, download_wikipedia_file, get_nested_json, parse_wiki_data,
-    strip_quotes,
-};
+use crate::parse_util::{download_wiki_data_to_file, download_wikipedia_file, get_nested_json, new_temp_file, parse_wiki_data, strip_quotes};
 use crate::regions::{Chamber, Electorate, State};
 use std::collections::{HashMap};
 use std::fs::File;
@@ -392,7 +389,7 @@ fn canonicalise_electorate_name(chamber: Chamber, region: &str) -> anyhow::Resul
 /// Store a pretty-printed text file with the attribution info, into the directory in which the
 /// image will be posted.
 fn store_attr_txt(img_data: &ImageInfo, path: &String, wikipedia_title: &str) -> anyhow::Result<File> {
-    let mut attribution_file = NamedTempFile::new()?;
+    let mut attribution_file = new_temp_file()?;
     const UNKNOWN: &str = "Unknown";
     let short_name: &str = match &img_data.attribution_short_name {
         Some(name) => name,

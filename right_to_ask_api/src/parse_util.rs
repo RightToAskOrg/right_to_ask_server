@@ -2,6 +2,7 @@
 
 use std::fs::File;
 use std::io::Write;
+use std::path::Path;
 use anyhow::anyhow;
 use regex::Regex;
 use reqwest::Client;
@@ -11,11 +12,17 @@ use reqwest::header::{HeaderMap, ACCEPT, USER_AGENT, CONTENT_TYPE};
 const DD_USER_AGENT : &'static str = "right-to-ask/api; https://www.democracydevelopers.org.au/; info@democracydevelopers.org.au";
 pub const WIKI_DATA_BASE_URL : &'static str = "https://query.wikidata.org/sparql?query=";
 
+/// Newer versions of NamedTempFile use linking for persistence which is a problem with multiple directories.
+/// Use a local tmp directory if it exists.
+pub(crate) fn new_temp_file() -> std::io::Result<NamedTempFile> {
+    if Path::new("tmp").is_dir() { NamedTempFile::new_in("tmp") } else { NamedTempFile::new() }
+}
+
 /// Download from a URL to a temporary file.
 pub(crate) async fn download_to_file(url:&str) -> anyhow::Result<NamedTempFile> {
     let url = url.replace("http://", "https://");
     println!("Downloading {}",url);
-    let mut file = NamedTempFile::new()?;
+    let mut file = new_temp_file()?;
     let response = reqwest::get(url).await?;
     let content= response.bytes().await?;
     file.write_all(&content)?;
@@ -29,7 +36,7 @@ pub(crate) async fn download_to_file(url:&str) -> anyhow::Result<NamedTempFile> 
 pub(crate) async fn download_wikipedia_file(insecure_url:&str, client: &Client) -> anyhow::Result<NamedTempFile> {
     let url = insecure_url.replace("http://", "https://");
     // println!("Downloading wiki data to file from {}", &url);
-    let mut file = NamedTempFile::new()?;
+    let mut file = new_temp_file()?;
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, DD_USER_AGENT.parse().unwrap());
     headers.insert(ACCEPT, "application/json".parse().unwrap());
@@ -47,7 +54,7 @@ pub(crate) async fn download_wikipedia_file(insecure_url:&str, client: &Client) 
 /// Download a json file using a wikidata query.
 pub(crate) async fn download_wiki_data_to_file(query:&str, client: &Client) -> anyhow::Result<NamedTempFile> {
     // println!("Downloading wiki data to json file from query");
-    let mut file = NamedTempFile::new()?;
+    let mut file = new_temp_file()?;
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, DD_USER_AGENT.parse()?);
     headers.insert(ACCEPT, "application/json".parse()?);
