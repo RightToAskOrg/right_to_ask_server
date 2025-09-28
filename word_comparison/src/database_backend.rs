@@ -20,11 +20,11 @@ pub trait WordComparisonDatabaseBackend {
     type ExternalQuestionId : Clone;
 
     /// Find sentences containing the listed word (one of the curated words)
-    fn sentences_containing_listed_word(&self,word:ListedKeywordIndex) -> anyhow::Result<Option<Cow<Vec<InternalQuestionId>>>>;
+    fn sentences_containing_listed_word(&self,word:ListedKeywordIndex) -> anyhow::Result<Option<Cow<'_,Vec<InternalQuestionId>>>>;
     /// Find sentences containing a word in the general lexicon.
-    fn sentences_containing_general_lexicon_word(&self,word:WordIndex) -> anyhow::Result<Option<Cow<Vec<InternalQuestionId>>>>;
+    fn sentences_containing_general_lexicon_word(&self,word:WordIndex) -> anyhow::Result<Option<Cow<'_,Vec<InternalQuestionId>>>>;
     /// Find sentences containing a unknown word. Possibly a typo, possibly vital hashtag or jargon.
-    fn sentences_containing_unknown_word(&self,word:&str) -> anyhow::Result<Option<Cow<Vec<InternalQuestionId>>>>;
+    fn sentences_containing_unknown_word(&self,word:&str) -> anyhow::Result<Option<Cow<'_,Vec<InternalQuestionId>>>>;
 
     /// For a sentence that has been divided up into tokens, record said tokens as associated with this sentence.
     fn add_sentence_and_components<'a>(&mut self,external_id:Self::ExternalQuestionId,parsed:ParsedQuestion) -> anyhow::Result<InternalQuestionId>;

@@ -29,15 +29,15 @@ pub struct FlatfileDatabaseBackend<Q : Clone+Display> {
 impl <Q : Clone+Display+PartialEq+FromStr> WordComparisonDatabaseBackend for FlatfileDatabaseBackend<Q> {
     type ExternalQuestionId = Q;
 
-    fn sentences_containing_listed_word(&self, word: ListedKeywordIndex) -> anyhow::Result<Option<Cow<Vec<InternalQuestionId>>>> {
+    fn sentences_containing_listed_word(&self, word: ListedKeywordIndex) -> anyhow::Result<Option<Cow<'_,Vec<InternalQuestionId>>>> {
         Ok(self.containing_keyword.get(&word).map(|v|Cow::Borrowed(v)))
     }
 
-    fn sentences_containing_general_lexicon_word(&self, word: WordIndex) -> anyhow::Result<Option<Cow<Vec<InternalQuestionId>>>> {
+    fn sentences_containing_general_lexicon_word(&self, word: WordIndex) -> anyhow::Result<Option<Cow<'_,Vec<InternalQuestionId>>>> {
         Ok(self.containing_known_word.get(&word).map(|v|Cow::Borrowed(v)))
     }
 
-    fn sentences_containing_unknown_word(&self, word: &str) -> anyhow::Result<Option<Cow<Vec<InternalQuestionId>>>> {
+    fn sentences_containing_unknown_word(&self, word: &str) -> anyhow::Result<Option<Cow<'_,Vec<InternalQuestionId>>>> {
         Ok(self.containing_unique.get(word).map(|v|Cow::Borrowed(v)))
     }
 
