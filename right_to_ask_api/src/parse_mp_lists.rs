@@ -158,7 +158,11 @@ impl ParsedAustralianSenatePDF {
                 }
             }
             Err(anyhow!("Could not match Australian Senate first name {} for surname {} with email data",&mp.first_name,&mp.surname))
-        } else { Err(anyhow!("No email for anyone with surname {}. Full MP details {:?}",mp.surname,mp))}
+        } else {
+            // TODO remove the below line when an email is provided.
+            if mp.surname=="Bell" && mp.electorate.chamber==Chamber::Australian_Senate { return Ok(()); }
+            Err(anyhow!("No email for anyone with surname {}. Full MP details {:?}",mp.surname,mp))
+        }
     }
 }
 struct ParseAustralianSenatePDFWork {
@@ -202,6 +206,8 @@ impl ParseAustralianSenatePDFWork {
         } else if text.starts_with(", Senator ") {
             if let Some(surname) = self.history.take() {
                 let first = text.trim_start_matches(", Senator ").trim_start_matches("the Hon ").trim().to_string();
+                // TODO : The current file has a missing value for Sean Frederick Bell which messes things up. Remove the following line when it is fixed.
+                if self.current_name.as_ref().is_some_and(|(_,sur)|"Bell"==sur) { self.current_name=None; }
                 if self.current_name.is_some() { return Err(anyhow!("Haven't dealt with current name"))}
                 self.current_name=Some((first,surname));
             }
@@ -596,7 +602,7 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     std::fs::create_dir_all(MP_SOURCE)?;
     let dir = PathBuf::from_str(MP_SOURCE)?;
     let client = reqwest::Client::new();
-
+    
     // NT
     let nt_members = download_to_file("https://parliament.nt.gov.au/__data/assets/pdf_file/0004/1457113/MASTER-15th-Legislative-Assembly-List-of-Members-for-webpage-March-2025.pdf").await?;
     parse_nt_la_pdf(nt_members.path())?;
