@@ -37,7 +37,7 @@ clap = { version = "3.2", features = ["derive"] }
 encoding_rs = "0.8"
 encoding_rs_io = "0.1"
 url = "2.2.2"
-lru = "0.10"
+lru = "0.16.3"
 lettre = { version = "0.10", features=["smtp-transport","tokio1","tokio1-native-tls","serde"]}
 # Just used for binaries. May be removed in future.
 tokio = { version = "1.26", features = ["full"] }
