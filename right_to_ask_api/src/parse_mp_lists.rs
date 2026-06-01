@@ -635,7 +635,7 @@ pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
     parse_tas(ha.path(),Chamber::Tas_House_Of_Assembly)?;
     ha.persist(dir.join(Chamber::Tas_House_Of_Assembly.to_string()+".xlsx"))?;
     store_wiki_data(&dir, &client, Chamber::Tas_House_Of_Assembly).await?;
-    let lc = download_to_file("https://www.parliament.tas.gov.au/__data/assets/excel_doc/0015/94002/Mail-Merge-as-at-13-October-2025.xlsx").await?;
+    let lc = download_to_file("https://www.parliament.tas.gov.au/__data/assets/excel_doc/0018/106128/Mail-Merge-as-at-19-May-2026.xlsx").await?;
     parse_tas(lc.path(),Chamber::Tas_Legislative_Council)?;
     lc.persist(dir.join(Chamber::Tas_Legislative_Council.to_string()+".xlsx"))?;
     store_wiki_data(&dir, &client, Chamber::Tas_Legislative_Council).await?;
