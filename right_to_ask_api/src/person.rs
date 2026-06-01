@@ -19,7 +19,7 @@ use mysql::prelude::{Queryable, ConvIr, FromValue};
 use merkle_tree_bulletin_board::hash::HashValue;
 use merkle_tree_bulletin_board::hash_history::{Timestamp, timestamp_now};
 use once_cell::sync::Lazy;
-use rand::Rng;
+use rand::RngExt;
 use sha2::{Digest, Sha256};
 use crate::config::CONFIG;
 use crate::mp::MPSpec;
@@ -567,7 +567,7 @@ impl RequestEmailValidation {
                 }
             }
         }
-        let code : u32 = rand::thread_rng().gen_range(100000..1000000);
+        let code : u32 = rand::rng().random_range(100000..1000000);
         sig.signed_message.unsigned.add_to_times_sent().await?;
         let parsed_to : Mailbox = sig.signed_message.unsigned.email.parse().map_err(|_|EmailValidationError::InvalidEmailAddress)?;
         if let Some(email_config) = &CONFIG.email {

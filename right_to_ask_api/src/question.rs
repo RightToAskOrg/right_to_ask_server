@@ -17,7 +17,7 @@ use merkle_tree_bulletin_board::hash_history::{Timestamp, timestamp_now};
 use mysql::prelude::Queryable;
 use mysql::{Transaction, TxOpts};
 use once_cell::sync::Lazy;
-use rand::Rng;
+use rand::RngExt;
 use reqwest::Url;
 use sha2::{Digest, Sha256};
 use url::Host;
@@ -972,7 +972,7 @@ pub type PreviousQueryToken = HashValue;
 impl QuestionPagination {
     fn generate_random_token() -> PreviousQueryToken {
         let mut res = [0u8;32];
-        rand::thread_rng().fill(&mut res);
+        rand::rng().fill(&mut res);
         HashValue(res)
     }
 
