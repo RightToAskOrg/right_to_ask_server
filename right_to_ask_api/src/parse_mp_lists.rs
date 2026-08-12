@@ -648,8 +648,7 @@ pub async fn update_mp_list_of_files_for_jurisdictions(jurisdictions : &[Jurisdi
 
     // TAS
     if jurisdictions.contains(&Jurisdiction::TAS) {
-        // https://www.parliament.tas.gov.au/__data/assets/excel_doc/0026/14597/Housemembers.xlsx
-        let ha = download_to_file("https://www.parliament.tas.gov.au/__data/assets/excel_doc/0026/14597/Housemembers.xlsx").await?;
+        let ha = download_to_file("https://www.parliament.tas.gov.au/__data/assets/excel_doc/0026/14597/HAMembers.xlsx").await?;
         parse_tas(ha.path(), Chamber::Tas_House_Of_Assembly)?;
         ha.persist(dir.join(Chamber::Tas_House_Of_Assembly.to_string() + ".xlsx"))?;
         store_wiki_data(&dir, &client, Chamber::Tas_House_Of_Assembly).await?;
