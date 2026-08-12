@@ -31,23 +31,23 @@ impl From<State> for Value {
 impl TryFrom<&str> for State {
 	type Error = anyhow::Error;
 	fn try_from(value: &str) -> Result<Self, Self::Error> {
-		match value.as_bytes() {
-			b"ACT" => Ok(State::ACT),
-			b"NSW" => Ok(State::NSW),
-			b"NT" => Ok(State::NT),
-			b"QLD" => Ok(State::QLD),
-			b"SA" => Ok(State::SA),
-			b"TAS" => Ok(State::TAS),
-			b"VIC" => Ok(State::VIC),
-			b"WA" => Ok(State::WA),
-			b"AUSTRALIAN CAPITAL TERRITORY" => Ok(State::ACT),
-			b"NEW SOUTH WALES" => Ok(State::NSW),
-			b"NORTHERN TERRITORY" => Ok(State::NT),
-			b"QUEENSLAND" => Ok(State::QLD),
-			b"SOUTH AUSTRALIA" => Ok(State::SA),
-			b"TASMANIA" => Ok(State::TAS),
-			b"VICTORIA" => Ok(State::VIC),
-			b"WESTERN AUSTRALIA" => Ok(State::WA),
+		match value {
+			"ACT" => Ok(State::ACT),
+			"NSW" => Ok(State::NSW),
+			"NT" => Ok(State::NT),
+			"QLD" => Ok(State::QLD),
+			"SA" => Ok(State::SA),
+			"TAS" => Ok(State::TAS),
+			"VIC" => Ok(State::VIC),
+			"WA" => Ok(State::WA),
+			"AUSTRALIAN CAPITAL TERRITORY" => Ok(State::ACT),
+			"NEW SOUTH WALES" => Ok(State::NSW),
+			"NORTHERN TERRITORY" => Ok(State::NT),
+			"QUEENSLAND" => Ok(State::QLD),
+			"SOUTH AUSTRALIA" => Ok(State::SA),
+			"TASMANIA" => Ok(State::TAS),
+			"VICTORIA" => Ok(State::VIC),
+			"WESTERN AUSTRALIA" => Ok(State::WA),
 			_ => Err(anyhow!("Invalid state {}",value)),
 		}
 	}
