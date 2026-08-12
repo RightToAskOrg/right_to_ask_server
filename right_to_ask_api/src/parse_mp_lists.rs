@@ -73,7 +73,7 @@ fn parse_csv<F:Read>(file : F,chamber:Chamber,surname_heading:&str,first_name_he
 
 /// Parse a CSV file of MPs, given the headings, extracting them, and optionally an extra column specified by the `extra_heading` parameter.
 fn parse_csv_getting_extra<F:Read>(file : F,chamber:Chamber,surname_heading:&str,first_name_heading:&[&str],email_heading:Option<&str>,electorate_heading:Option<&str>,role_heading:&[&str],party_heading:&str,extra_heading:Option<&str>) -> anyhow::Result<(Vec<MP>,Vec<String>)> {
-    let mut reader = csv::Reader::from_reader(file);
+    let mut reader = csv::ReaderBuilder::new().flexible(true).from_reader(file); // The Federal house of repos as of Aug 2026 has trailing extra blank fields. // csv::Reader::from_reader(file);
     let mut mps = Vec::new();
     let mut extra_vec = Vec::new();
     let headings = reader.headers()?;
@@ -768,6 +768,7 @@ pub async fn create_mp_list_for_jurisdictions(jurisdictions: &[Jurisdiction]) ->
         let mut found = parse_act_la(&dir.join(Chamber::ACT_Legislative_Assembly.to_string()+".html"))?;
         println!("Found {} in the ACT Legislative Assembly",found.len());
         add_non_authoritative(&mut found, &dir, Chamber::ACT_Legislative_Assembly).await?;
+        mps.extend(found);
     }
     if jurisdictions.contains(&Jurisdiction::NSW) { // Deal with NSW
         println!("Processing NSW");
