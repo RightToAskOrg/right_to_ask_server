@@ -1,4 +1,4 @@
-use right_to_ask_api::mp::{update_mp_list_of_files, update_mp_list_of_files_for_jurisdictions, create_mp_list};
+use right_to_ask_api::mp::{update_mp_list_of_files, update_mp_list_of_files_for_jurisdictions, create_mp_list, create_mp_list_for_jurisdictions};
 use right_to_ask_api::regions::Jurisdiction;
 
 #[tokio::main]
@@ -12,13 +12,14 @@ async fn main() -> anyhow::Result<()> {
         println!("Creating MP_source/MPs.json");
         create_mp_list().await?;
     } else {
-        let jurisdictions: Vec<Jurisdiction>
-            = jurisdictions.into_iter().map(|j| Jurisdiction::try_from(j.to_ascii_uppercase().as_str())
+        let print_jurisdictions = &jurisdictions.join(", ");
+        let js: &Vec<Jurisdiction>
+            = &jurisdictions.into_iter().map(|j| Jurisdiction::try_from(j.to_ascii_uppercase().as_str())
               .expect("Bad jurisdiction - use Federal, ACT, NSW, NT, QLD, SA, TAS, VIC, WA.\n")).collect();
-        println!("Downloading into MP_Source/ and checking files for {}", jurisdictions.iter().map(|j| j.to_string()).collect::<Vec<String>>().join(", "));
-        update_mp_list_of_files_for_jurisdictions(jurisdictions).await?;
-        println!("Creating MP_source/MPs.json");
-        // create_mp_list().await?;
+        println!("Downloading into MP_Source/ and checking files for {}", print_jurisdictions);
+        update_mp_list_of_files_for_jurisdictions(&js).await?;
+        println!("Creating MP_source/MPs.json for {print_jurisdictions}");
+        create_mp_list_for_jurisdictions(js).await?;
 
     }
     println!("Ran successfully");
