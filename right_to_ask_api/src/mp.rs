@@ -1,7 +1,7 @@
 //! Human representatives - generalization of MPs, hereafter just referred to as MPs.
 
 use crate::regions::{Chamber, Electorate, RegionContainingOtherRegions};
-pub use crate::parse_mp_lists::{update_mp_list_of_files,update_mp_list_of_files_for_jurisdictions,create_mp_list,create_mp_list_for_jurisdictions};
+pub use crate::parse_mp_lists::{update_mp_list_of_files,update_mp_list_of_files_for_jurisdictions,create_mp_list,create_mp_list_for_jurisdictions,STATE_AND_FEDERAL_JURISDICTIONS};
 use serde::{Serialize,Deserialize};
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
