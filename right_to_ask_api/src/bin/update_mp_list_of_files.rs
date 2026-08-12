@@ -12,15 +12,14 @@ async fn main() -> anyhow::Result<()> {
         println!("Creating MP_source/MPs.json");
         create_mp_list().await?;
     } else {
-        let print_jurisdictions = &jurisdictions.join(", ");
-        let js: &Vec<Jurisdiction>
-            = &jurisdictions.into_iter().map(|j| Jurisdiction::try_from(j.to_ascii_uppercase().as_str())
+        let print_jurisdictions = jurisdictions.join(", ");
+        let js: Vec<Jurisdiction>
+            = jurisdictions.into_iter().map(|j| Jurisdiction::try_from(j.to_ascii_uppercase().as_str())
               .expect("Bad jurisdiction - use Federal, ACT, NSW, NT, QLD, SA, TAS, VIC, WA.\n")).collect();
         println!("Downloading into MP_Source/ and checking files for {}", print_jurisdictions);
         update_mp_list_of_files_for_jurisdictions(&js).await?;
         println!("Creating MP_source/MPs.json for {print_jurisdictions}");
-        create_mp_list_for_jurisdictions(js).await?;
-
+        create_mp_list_for_jurisdictions(&js).await?;
     }
     println!("Ran successfully");
     Ok(())

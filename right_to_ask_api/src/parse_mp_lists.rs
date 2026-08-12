@@ -37,7 +37,6 @@ pub const STATE_AND_FEDERAL_JURISDICTIONS: [Jurisdiction;9] = [Jurisdiction::Fed
     Jurisdiction::NT, Jurisdiction::QLD, Jurisdiction::TAS,
     Jurisdiction::SA, Jurisdiction::VIC, Jurisdiction::WA];
 
-
 fn parse_australian_senate(file : File) -> anyhow::Result<Vec<MP>> {
     let transcoded = DecodeReaderBytesBuilder::new().encoding(Some(encoding_rs::WINDOWS_1252)).build(file);
     parse_csv(transcoded, Chamber::Australian_Senate, "Surname", &["Preferred Name", "First Name"], None, Some("State"), &["Parliamentary Titles"],"Political Party")
@@ -605,11 +604,11 @@ fn extract_electorates(mps : &[MP]) -> anyhow::Result<HashSet<String>> {
 /// Download, check, and if valid replace the downloaded files with MP lists. First of the two stages for generating MPs.json
 /// Default version gets all states and territories, plus Federal.
 pub async fn update_mp_list_of_files() -> anyhow::Result<()> {
-    update_mp_list_of_files_for_jurisdictions(&STATE_AND_FEDERAL_JURISDICTIONS.to_vec()).await?;
+    update_mp_list_of_files_for_jurisdictions(&STATE_AND_FEDERAL_JURISDICTIONS).await?;
     Ok(())
 }
 
-pub async fn update_mp_list_of_files_for_jurisdictions(jurisdictions : &Vec<Jurisdiction>) -> anyhow::Result<()> {
+pub async fn update_mp_list_of_files_for_jurisdictions(jurisdictions : &[Jurisdiction]) -> anyhow::Result<()> {
     std::fs::create_dir_all(MP_SOURCE)?;
     let dir = PathBuf::from_str(MP_SOURCE)?;
     let client = reqwest::Client::new();
@@ -728,11 +727,11 @@ pub async fn update_mp_list_of_files_for_jurisdictions(jurisdictions : &Vec<Juri
 /// Create "data/MP_source/MPs.json" from the source files downloaded by update_mp_list_of_files(). Second of the two stages for generating MPs.json
 /// Default version gets all states and territories, plus Federal.
 pub async fn create_mp_list() -> anyhow::Result<()> {
-    create_mp_list_for_jurisdictions(&STATE_AND_FEDERAL_JURISDICTIONS.to_vec()).await?;
+    create_mp_list_for_jurisdictions(&STATE_AND_FEDERAL_JURISDICTIONS).await?;
     Ok(())
 }
 
-pub async fn create_mp_list_for_jurisdictions(jurisdictions: &Vec<Jurisdiction>) -> anyhow::Result<()> {
+pub async fn create_mp_list_for_jurisdictions(jurisdictions: &[Jurisdiction]) -> anyhow::Result<()> {
 
     let dir = PathBuf::from_str(MP_SOURCE)?;
     let mut mps : Vec<MP> = Vec::new();
