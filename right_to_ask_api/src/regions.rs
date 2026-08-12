@@ -208,6 +208,47 @@ impl From<Jurisdiction> for Value {
 	}
 }
 
+impl TryFrom<&str> for Jurisdiction {
+	type Error = anyhow::Error;
+	fn try_from(value: &str) -> Result<Self, Self::Error> {
+		match value.as_bytes() {
+			b"Federal" => Ok(Jurisdiction::Federal),
+			b"ACT" => Ok(Jurisdiction::ACT),
+			b"NSW" => Ok(Jurisdiction::NSW),
+			b"NT" => Ok(Jurisdiction::NT),
+			b"QLD" => Ok(Jurisdiction::QLD),
+			b"SA" => Ok(Jurisdiction::SA),
+			b"TAS" => Ok(Jurisdiction::TAS),
+			b"VIC" => Ok(Jurisdiction::VIC),
+			b"WA" => Ok(Jurisdiction::WA),
+			b"FEDERAL" => Ok(Jurisdiction::Federal),
+			b"AUSTRALIAN CAPITAL TERRITORY" => Ok(Jurisdiction::ACT),
+			b"NEW SOUTH WALES" => Ok(Jurisdiction::NSW),
+			b"NORTHERN TERRITORY" => Ok(Jurisdiction::NT),
+			b"QUEENSLAND" => Ok(Jurisdiction::QLD),
+			b"SOUTH AUSTRALIA" => Ok(Jurisdiction::SA),
+			b"TASMANIA" => Ok(Jurisdiction::TAS),
+			b"VICTORIA" => Ok(Jurisdiction::VIC),
+			b"WESTERN AUSTRALIA" => Ok(Jurisdiction::WA),
+			b"ACT_Legislative_Assembly" => Ok(Jurisdiction::ACT_Legislative_Assembly),
+			b"Australian_House_Of_Representatives" => Ok(Jurisdiction::Australian_House_Of_Representatives),
+			b"Australian_Senate" => Ok(Jurisdiction::Australian_Senate),
+			b"NSW_Legislative_Assembly" => Ok(Jurisdiction::NSW_Legislative_Assembly),
+			b"NSW_Legislative_Council" => Ok(Jurisdiction::NSW_Legislative_Council),
+			b"NT_Legislative_Assembly" => Ok(Jurisdiction::NT_Legislative_Assembly),
+			b"Qld_Legislative_Assembly" => Ok(Jurisdiction::Qld_Legislative_Assembly),
+			b"SA_House_Of_Assembly" => Ok(Jurisdiction::SA_House_Of_Assembly),
+			b"SA_Legislative_Council" => Ok(Jurisdiction::SA_Legislative_Council),
+			b"Vic_Legislative_Assembly" => Ok(Jurisdiction::Vic_Legislative_Assembly),
+			b"Vic_Legislative_Council" => Ok(Jurisdiction::Vic_Legislative_Council),
+			b"Tas_House_Of_Assembly" => Ok(Jurisdiction::Tas_House_Of_Assembly),
+			b"Tas_Legislative_Council" => Ok(Jurisdiction::Tas_Legislative_Council),
+			b"WA_Legislative_Assembly" => Ok(Jurisdiction::WA_Legislative_Assembly),
+			b"WA_Legislative_Council" => Ok(Jurisdiction::WA_Legislative_Council),
+			_ => Err(anyhow!("Invalid Jurisdiction {}",value)),
+		}
+	}
+}
 impl ConvIr<Jurisdiction> for Jurisdiction {
 	fn new(v: Value) -> Result<Self, FromValueError> {
 		match v { // May have to deal with int and uint if it is an enumeration on the server.
