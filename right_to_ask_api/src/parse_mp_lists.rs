@@ -426,7 +426,7 @@ fn parse_wa(path:&Path,chamber:Chamber) -> anyhow::Result<Vec<MP>> {
         let mp = MP{
             first_name,
             surname,
-            electorate: Electorate { chamber, region: Some(electorate.to_string()) },
+            electorate: Electorate { chamber, region: if chamber==Chamber::WA_Legislative_Council {None} else {Some(electorate.to_string())} },
             email,
             role : roles.join("; "),
             party : party.ok_or_else(||anyhow!("Could not find party in WA html file"))?,
