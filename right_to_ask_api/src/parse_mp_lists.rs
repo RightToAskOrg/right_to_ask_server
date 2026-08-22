@@ -389,6 +389,68 @@ fn parse_act_la(path:&Path) -> anyhow::Result<Vec<MP>> {
     Ok(mps)
 }
 
+/// Sometimes there is an HTML page with a list of MPs, with more details on the MP on other pages.
+/// In this case the parser should return a vec of these instead of a vec of MPs
+#[expect(unused,reason="NT blocks automatic downloads")]
+struct MPWithExtraInfoElsewhere {
+    name: String,
+    extra_url : String,
+}
+
+#[expect(unused,reason="NT blocks automatic downloads")]
+fn parse_nt_la_list_of_members(path:&Path) -> anyhow::Result<Vec<MPWithExtraInfoElsewhere>> {
+    let mut mps = Vec::new();
+    let html = scraper::Html::parse_document(&std::fs::read_to_string(path)?);
+    for a in html.select(&Selector::parse("a[href^='https://parliament.nt.gov.au/members/by-name/']").unwrap()) {
+        let name = a.text().next().ok_or_else(||anyhow!("Could not find name in NT list"))?.trim().to_string();
+        let extra_url = a.value().attr("href").ok_or_else(|| anyhow!("Could not find url in NT list"))?.to_string();
+        println!("Name: {name}\nURL: {extra_url}");
+        mps.push(MPWithExtraInfoElsewhere{name, extra_url});
+    }
+    Ok(mps)
+}
+
+/// split a name into (first_name,surname), guessing that the surname is a single word.
+fn guess_name_split(full_name:&str) -> (String,String) {
+    match full_name.rsplit_once(' ') {
+        Some((first_name,surname)) => (first_name.trim().to_string(),surname.to_string()),
+        None => ("".to_string(),full_name.to_string())
+    }
+}
+
+#[expect(unused,reason="NT blocks automatic downloads")]
+fn parse_nt_la_single_member_info(path:&Path) -> anyhow::Result<MP> {
+    let html = scraper::Html::parse_document(&std::fs::read_to_string(path)?);
+    let body = html.select(&Selector::parse("div.content-body").unwrap()).next().ok_or_else(||anyhow!("Could not find content-body in NT {path:?}"))?;
+    let h1 = body.select(&Selector::parse("h1").unwrap()).next().ok_or_else(||anyhow!("Could not find h1 in NT {path:?}"))?;
+    let name = h1.text().next().ok_or_else(||anyhow!("Could not find name in NT h1 {path:?}"))?.trim().trim_start_matches("Hon ").trim();
+    let (first_name,surname) = guess_name_split(name);
+    let mut region = None; // Electorate
+    let mut party = "".to_string();
+    let mut role = "".to_string();
+    let mut email = "".to_string();
+    let select_td = Selector::parse("td,th").unwrap();
+    for tr in body.select(&Selector::parse("tr").unwrap()) {
+        let tds : Vec<_> = tr.select(&select_td).collect();
+        if tds.len()!=2 { return Err(anyhow!("Unexpected number of columns in NT table {path:?}"))}
+        if let Some(key) = tds[0].text().next() {
+            if let Some(value) = tds[1].text().next() {
+                let value = value.trim().to_string();
+                match key.trim() {
+                    "Electorate" => { region = Some(value) }
+                    "Party" => { party = value }
+                    "Ministry" => { role = value }
+                    "Email" => { email = value }
+                    _ => {}
+                }
+            }
+        }
+    }
+    let electorate = Electorate { chamber: Chamber::NT_Legislative_Assembly, region};
+    println!("name : {first_name} {surname} electorate {} email {} role {}",electorate,email,role);
+    Ok(MP{first_name,surname,electorate,email,role,party,non_authoritative: None,})
+}
+
 fn warning<T,E,F>(input:Result<T,E>,empty:F) ->T
 where F:FnOnce()->T, E:Display {
     match input {
@@ -669,9 +731,26 @@ pub async fn update_mp_list_of_files_for_jurisdictions(jurisdictions : &[Jurisdi
 
     // NT
     if jurisdictions.contains(&Jurisdiction::NT) {
-        let nt_members = download_to_file("https://parliament.nt.gov.au/__data/assets/pdf_file/0004/1457113/MASTER-15th-Legislative-Assembly-List-of-Members-for-webpage-July-2026.pdf").await?;
-        parse_nt_la_pdf(nt_members.path())?;
-        nt_members.persist(dir.join(Chamber::NT_Legislative_Assembly.to_string()+".pdf"))?;
+        /* Code below would parse the website, except the server shows different things to browsers and non-browsers
+        let la = download_to_file("https://parliament.nt.gov.au/members/by-name").await?;
+        let list = parse_nt_la_list_of_members(la.path())?;
+        la.persist(dir.join(Chamber::NT_Legislative_Assembly.to_string() + ".html"))?;
+        for url in list {
+            let page = download_to_file(&url.extra_url).await?;
+            let _mp = parse_nt_la_single_member_info(page.path())?;
+            let loc = dir.join(Chamber::NT_Legislative_Assembly.to_string()+"/"+&url.name+".html");
+            page.persist(loc)?;
+        }
+        */
+        // Code below assumes you manually download the file.
+        let expected_location = dir.join(Chamber::NT_Legislative_Assembly.to_string()+".pdf");
+        if !expected_location.exists() {
+            anyhow::bail!("Please download (in a browser) the PDF file liked to by https://parliament.nt.gov.au/members/by-name with the name 'Contact details for members' and store it at {}",expected_location.to_string_lossy());
+        }
+        parse_nt_la_pdf(&expected_location)?;
+        //let nt_members = download_to_file("https://parliament.nt.gov.au/__data/assets/pdf_file/0004/1457113/MASTER-15th-Legislative-Assembly-List-of-Members-for-webpage-July-2026.pdf").await?;
+        //parse_nt_la_pdf(nt_members.path())?;
+        //nt_members.persist(dir.join(Chamber::NT_Legislative_Assembly.to_string()+".pdf"))?;
         if should_get_wiki { store_wiki_data(&dir, &client, Chamber::NT_Legislative_Assembly).await?; }
     }
 
@@ -836,6 +915,15 @@ pub async fn create_mp_list_for_jurisdictions(jurisdictions: &[Jurisdiction]) ->
     }
     if jurisdictions.contains(&Jurisdiction::NT) { // Deal with NT
         println!("Processing NT");
+        /* Code below should parse the HTML files... except the NT website blocks non-browsers.
+        let mut found = vec![];
+        let list =parse_nt_la_list_of_members(&dir.join(Chamber::NT_Legislative_Assembly.to_string()+".html"))?;
+        for url in list {
+            let loc = dir.join(Chamber::NT_Legislative_Assembly.to_string()+"/"+&url.name+".html");
+            let mp = parse_nt_la_single_member_info(&loc)?;
+            found.push(mp);
+        } */
+        // code below parses the manually loaded PDF file.
         let mut found=parse_nt_la_pdf(&dir.join(Chamber::NT_Legislative_Assembly.to_string()+".pdf"))?;
         println!("Found {} in the NT Legislative Assembly",found.len());
         add_non_authoritative(&mut found, &dir, Chamber::NT_Legislative_Assembly).await?;
